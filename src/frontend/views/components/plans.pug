@@ -1,0 +1,162 @@
+extends layout
+block component
+  #plans.stage(ng-controller="plansCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p 
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .main.container(ng-show="stage.status == ''")
+      h1 Plans
+      .tiers.row
+        .tier.col-md-4(ng-repeat="plan in plans.list")
+          .tier-border(ng-click="plans.selected = plan", ng-class="{true:'border-accent', false:'border-secondary'}[plans.selected==plan]")
+            h3.best(ng-if="plan.id == 'MID'") Best
+            h3.nickname
+              img(ng-src="../img/plans/{{plan.img}}")
+              | {{plan.name}}
+            hr
+            h1 {{plan.size}}
+            .price= "${{plan.price}} / month"
+            hr
+            ul
+              li(ng-repeat="feature in plan.features") {{feature}}
+      .billing.row
+        .options
+          button(ng-click="plans.selected.cycle = 'monthly'", ng-class="{'border-accent': plans.selected.cycle=='monthly'}")
+            | Bill monthly = ${{plans.selected.price}}
+          button(ng-click="plans.selected.cycle = 'quaterly'", ng-class="{'border-accent': plans.selected.cycle=='quaterly'}")
+            | Every 4 months = ${{plans.selected.price * 4}}
+          button(ng-click="plans.selected.cycle = 'annually'", ng-class="{'border-accent': plans.selected.cycle=='annually'}")
+            | Annually = ${{plans.selected.price * 12}}
+        .summary
+          | CAD$ {{plans.selected.price * (plans.selected.cycle=='monthly' ? 1 : plans.selected.cycle=='quaterly' ? 4 : 12)}}
+          button.bg-accent.color-inverse(ng-click="plans.buyPlan(plans.selected)") Purchase
+      h2 What does it all mean?
+      br
+      h3 Archive Speeds
+      p
+        | Binder performs periodic scans of your archiving folders to look for changes.
+        |  These changes could be an edit to a file, an added file, or a deleted file.
+        |  Binder cannot track file renaming because a rename changes the original identifier of the file.
+      p
+        | When a file change is discovered, Binder schedules it for archiving.
+        |  It's possible for tens to hundreds of files to be sheduled for archive at the same time.
+        |  This creates problems with how your data is stored -- too much incoming traffic can 'overwhelm' the database where your files live.
+      p
+        | This is why smaller plans have slower archive speeds, because they cannot handle all that incoming traffic.
+      h3 Retrieve Speeds
+      p
+        | The whole purpose of backing up your data to the cloud is to access it in a time of need.
+        |  Data retrievals, similar to archives, can 'overwhelm' a database. Hence, smaller plans have slower retrieval speeds.
+      p Another reason for throttling is because retrievals involve unarchiving up to hundreds of gigabytes at a time, which can be very memory intensive depending on your plan.
+      h3 File Versioning
+      p
+        | File versioning is the process of keeping the old copies of your files even after they are updated.
+        |  This allows you to restore a file to a previous version if you do not want the new version to be archived.
+      p
+        | Because file versioning keeps multiple copies of a file, it will fill up your storage space quicker. It will also require more housekeeping, taking up even more space.
+        |  File versioning can be especially bad for the smaller 
+        code 3-ring [100gb]
+        |  and 
+        code 4-ring [300gb]
+        |  Binders, hence they do not support this feature.
+      #checkout(ng-show="billing.visible", class="display:none", ng-class="{'w3-animate-top': true, 'display:flex': true}")
+        .blocks(ng-class="{'w3-animate-zoom': true}")
+          .block.side
+            .block.bg-primary.drop-shadow-strong
+              .tier
+                .tier-border(ng-click="plans.selected = plan")
+                  h3.nickname
+                    img(ng-src="../img/plans/{{billing.plan.img}}")
+                    | {{billing.plan.name}}
+                  hr
+                  h1 {{billing.plan.size}}
+                  .price= "${{billing.plan.price}} / month"
+                  hr
+                  ul
+                    li(ng-repeat="feature in billing.plan.features") {{feature}}
+            .block.bg-primary.drop-shadow-strong
+              | Billed {{billing.plan.cycle}} = 
+              b.color-accent CAD$ {{billing.plan.price * (billing.plan.cycle=='monthly' ? 1 : billing.plan.cycle=='quaterly' ? 4 : 12)}}
+          .block.side
+            .block.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'info'", ng-class="{'w3-animate-zoom': true}")
+              form(ng-submit="billing.continueToStripe()")
+                h3.error(ng-show="billing.error") {{billing.error.msg}}
+                table
+                  tr
+                    td
+                      .input
+                        input(type='text', ng-model='billing.args.firstName', required, placeholder='Firstname')
+                        .label-floor
+                    td
+                      .input
+                        input(type='text', ng-model='billing.args.lastName', required, placeholder='Lastname')
+                        .label-floor
+                  tr
+                    td(colspan="2")
+                      .input
+                        input(type='text', ng-model='billing.args.address.line1', required, placeholder='Address 1')
+                        .label-floor
+                  tr
+                    td.address2(colspan="2")
+                      .input
+                        input(type='text', ng-model='billing.args.address.line2', placeholder='Address 2')
+                        .label-floor
+                      code.color-muted OPTIONAL
+                  tr
+                    td
+                      .input
+                        input(type='text', ng-model='billing.args.address.city', required, placeholder='City')
+                        .label-floor
+                    td
+                      .input
+                        input(type='text', ng-model='billing.args.address.postal_code', required, placeholder='Post code', ng-class="{'border-color:red': billing.error.cause=='postal-code'}")
+                        .label-floor
+                  tr
+                    td
+                      .input.country.bg-secondary(title="Binder is only available in Canada right now.")
+                        input.bg-secondary(type='text', ng-model='billing.args.address.country', required, placeholder='Country', readonly)
+                        .label-floor
+                .options
+                  button.bg-secondary(ng-click="billing.cancel()") Cancel
+                  button.bg-accent.color-inverse(type="submit") Continue
+            .block.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'", ng-class="{'w3-animate-zoom': true}")
+              form#payment-form(action='/charge', method='post')
+                .form-row
+                  label(for='card-element') Credit or debit card
+                  #card-element
+                    //- A Stripe Element will be inserted here.
+                  //- Used to display form errors.
+                  #card-errors(role='alert')
+                .buttons
+                  button.bg-secondary(ng-click="billing.stage = 'info'") Back
+                  button.bg-accent.color-inverse(type="submit") Submit Payment
+            .block.paying.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='loading'", ng-class="{'w3-animate-zoom': true}")
+              | Confirming your payment
+              | !{horzSpinner}
+            .block.paying.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='success'", ng-class="{'w3-animate-zoom': true}")
+              div
+                | Payment successful!
+                br
+                | Provisioning your storage..
+              | !{horzSpinner}
+              i.material-icons.color-accent done
+            .block.paying.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status==''&&billing.restartCountdown", ng-class="{'w3-animate-zoom': true}")
+              div
+                | Plan purchase completed
+                br
+                | Restarting in {{billing.restartCountdown}} {{billing.restartCountdown == 1 ? 'second' : 'seconds'}}..
+              | !{horzSpinner}
+              i.material-icons.color-accent done
+            .block.paying.error-popup.color-inverse.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='error'", ng-class="{'w3-animate-zoom': true}")
+              div
+                | Something's gone wrong!
+                br
+                | Please report this immediately
+              i.material-icons error

@@ -1,0 +1,88 @@
+extends layout
+block component
+  #folders.stage(ng-controller="foldersCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content.container(ng-if="stage.status == '' && G.user.plan")
+      .header
+        .title
+          h1
+            i.material-icons.color-accent folder_open
+            | Folders
+        .status
+          .live(ng-class="{true: 'color-red', false: 'color-muted'}[updates.isLive]")
+            | ● Live
+          .updated
+            | Last update was {{updates.formattedLastUpdate}}
+      br
+      .folders(ng-show="folders.status == 'loading'")
+        | !{horzSpinner}
+      .folders(ng-show="folders.status == ''")
+        //---------- add header
+        button.add(ng-if="folders.addStatus==''", ng-click="folders.startAdd()")
+          i.material-icons add_circle_outline
+          | Add
+        button.add(ng-if="folders.addStatus=='input'", ng-click="folders.cancelAdd()")
+          i.material-icons remove_circle_outline
+          | Cancel Add
+        //---------- add body
+        .folder.add.drop-shadow-light(ng-if="folders.addStatus != ''")
+          .info
+            h3 Backup a new folder
+            div(ng-show="folders.addStatus=='input'")
+              //- input#addFolderChoose(type="file", ng-model="folders.addFolderPath", ng-show="false")
+              button.choose-folder.bg-secondary(ng-click="folders.chooseFolder()") Choose folder
+              i {{folders.addFolderPath || 'Please choose a folder'}}
+            div(ng-show="folders.addStatus=='adding'")
+              | !{horzSpinner}
+            hr
+          .remove
+            button.color-accent(ng-disabled="!folders.addFolderPath || folders.addStatus=='adding'", ng-click="folders.finishAdd()") Backup folder
+        //---------- folder list
+        .folder(ng-repeat="folder in folders.list", ng-show="$index < 12 || folders.showAll")
+          .main
+            .expand
+              i.material-icons folder
+              //- button(ng-click="folders.toggleExpanded(folder)")
+              //-   i.material-icons(ng-show="!folder.expanded") add
+              //-   i.material-icons(ng-show="folder.expanded") remove
+            .info
+              div
+                b {{folder.name}}
+                div
+                  span(ng-show="folder.status == 'loading'") !{smallCircleSpinner}
+                  button.color-accent(ng-click="folders.viewStats(folder)") Stats
+              hr
+            .remove
+              button(ng-click="folders.removeFolder(folder)")
+                i.material-icons remove
+                | Remove
+          .expanded(ng-show="folder.expanded")
+            .sub(ng-repeat="subFolder in folder.subFolders")
+              div {{subFolder.name}}
+              hr
+            .ignored.color-muted(ng-repeat="file in folder.ignored")
+              div {{file.name}}
+              hr
+        //---------- show more
+        button.show-more(ng-if="folders.list.length > 12", ng-click="folders.showAll = !folders.showAll")
+          i.material-icons(ng-show="!folders.showAll") add
+          i.material-icons(ng-show="folders.showAll") remove
+          | {{folders.showAll? 'Show less' : 'Show more (' + (folders.list.length - 12) + ')'}}
+      br
+      .history
+        h2 History
+        br
+        .history-item(ng-repeat="item in history.list")
+          .info
+            span.date.color-muted {{item.formattedDate}}
+            |  {{item.action}}
+          hr

@@ -1,0 +1,204 @@
+#plans {
+  padding: 30px;
+}
+
+#plans p {
+  font-weight: 300;
+}
+
+#plans .tiers {
+  display: flex;
+  margin-left: -10px;
+  margin-right: -10px;
+  padding: 20px 10px;
+  justify-content: space-evenly;
+  border-radius: 12px;
+}
+
+#plans .tier {
+  min-height: 100%;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#plans .tier ul {
+  margin-left: 5px;
+  padding-left: 10px;
+  list-style-type: circle
+}
+
+#plans .tier .tier-border {
+  min-height: 100%;
+  padding: 20px 10px 10px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+#plans .tier .tier-border .best {
+  color: goldenrod;
+  margin-bottom: 7px;
+  text-align: center;
+}
+
+#plans .tier .nickname {
+  display: flex;
+  justify-content: center;
+}
+
+#plans .tier .nickname img {
+  margin-right: 10px;
+}
+
+#plans .billing {
+  display: flex;
+  margin-bottom: 30px;
+  padding: 7px;
+  justify-content: space-between;
+}
+
+#plans .billing .options {
+  display: flex;
+}
+
+#plans .billing .options button {
+  margin-right: 10px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+#plans .billing .summary {
+  display: inline-flex;
+  font-weight: 300;
+  align-items: center;
+}
+
+#plans .billing .summary button {
+  margin-left: 10px;
+  font-weight: 100;
+}
+
+#checkout {
+  display: flex;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(33, 33, 33, 0.7);
+  z-index: 2;
+  overflow: hidden;
+}
+
+#checkout .blocks {
+  display: flex;
+  align-items: center;
+}
+
+#checkout .block {
+  display: inline-block;
+  height: 100%;
+  padding: 25px;
+  border-radius: 10px;
+}
+
+#checkout .block + .block {
+  margin-left: 15px;
+}
+
+#checkout .block .input,
+#checkout .block .input input,
+#checkout .block .input .label-floor {
+  background-color: unset;
+}
+
+#checkout .block .input {
+  display: inline-flex;
+  width: 100%;
+  margin-top: 6px;
+  margin-right: 6px;
+  border: 1px solid #eeeeee !important;
+  border-radius: 5px;
+}
+
+#checkout .block .address2 .input {
+  width: 70%;
+}
+
+#checkout .block .country input {
+  cursor: not-allowed;
+}
+
+#checkout .block .input input {
+  flex-grow: 1;
+  padding: 3px;
+}
+
+#checkout .block .options {
+  margin-top: 10px;
+  text-align: right;
+}
+
+#checkout .block .options button {
+  margin-right: 10px;
+}
+
+#checkout .side {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+#checkout .side .block + .block {
+  margin-top: 15px;
+  margin-left: 0;
+}
+
+#checkout .paying {
+  display: flex;
+  padding: 10px 10% 10px 20px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#payment-form {
+  display: flex;
+  flex-direction: column;
+}
+
+#payment-form .form-row {
+  display: flex;
+  flex-direction: column;
+}
+
+#payment-form .buttons {
+  margin-top: 15px;
+}
+
+#payment-form .StripeElement {
+  box-sizing: border-box;
+  min-width: 400px;
+  height: 40px;
+
+  padding: 10px 12px;
+
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background-color: white;
+
+  box-shadow: 0 1px 3px 0 #e6ebf1;
+  -webkit-transition: box-shadow 150ms ease;
+  transition: box-shadow 150ms ease;
+}
+
+#payment-form .StripeElement--focus {
+  box-shadow: 0 1px 3px 0 #cfd7df;
+}
+
+#payment-form .StripeElement--invalid {
+  border-color: #fa755a;
+}
+
+#payment-form .StripeElement--webkit-autofill {
+  background-color: #fefde5 !important;
+}

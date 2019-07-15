@@ -1,0 +1,135 @@
+button i {
+  margin-right: 5px;
+}
+
+#folders {
+  padding: 30px;
+}
+
+#folders hr {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+#folders .content {
+  display: flex;
+  flex-direction: column;
+}
+
+#folders .header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#folders .header .title h1 {
+  display: flex;
+  align-items: center;
+}
+
+#folders .header .title i {
+  margin-right: 5px;
+  font-size: 28px;
+}
+
+#folders .header .status {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+}
+
+#folders .header .status .updated {
+  font-size: 12px;
+}
+
+#folders .folders button.add {
+  display: flex;
+  align-items: center;
+}
+
+#folders .folders button.show-more {
+  display: flex;
+  width: 72%;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+#folders .folders button.show-more:hover {
+  background-color: #eeeeee;
+}
+
+#folders .folders .folder {
+  display: flex;
+  min-width: 72%;
+  max-width: 72%;
+  flex-direction: column;
+}
+
+#folders .folders .folder.add {
+  margin-top: 10px;
+  margin-bottom: 20px;
+  padding: 16px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+#folders .folders .folder.add .choose-folder {
+  margin-bottom: 5px;
+}
+
+#folders .folders .folder .main {
+  display: flex;
+  align-items: center;
+}
+
+#folders .folders .folder .main .expand i {
+  margin-right: 10px;
+  color: #1de9b6;
+}
+
+#folders .folders .folder .expanded {
+  padding-left: 25px;
+}
+
+#folders .folders .folder .info {
+  flex-grow: 1;
+  margin-right: 10px;
+}
+
+#folders .folders .folder .info div {
+  display: flex;
+  margin-bottom: 2px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#folders .folders .folder .info div button {
+  margin-left: 10px;
+}
+
+#folders .folders .folder .remove {
+  display: flex;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  justify-content: center;
+}
+
+#folders .folders .load-more {
+  margin-top: 10px;
+}
+
+#folders .history {
+  margin-top: 25px;
+}
+
+#folders .history .history-item {
+  display: flex;
+  width: 72%;
+  padding: 6px;
+  flex-direction: column;
+}
+
+#folders .history .load-more {
+  margin-top: 10px;
+}

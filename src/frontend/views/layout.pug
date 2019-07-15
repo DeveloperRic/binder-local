@@ -1,0 +1,116 @@
+doctype html
+html(lang="en", ng-app="app")
+  head
+    meta(charset='UTF-8')
+    meta(name='viewport', content='width=device-width, initial-scale=1.0')
+    meta(http-equiv='X-UA-Compatible', content='ie=edge')
+    meta(http-equiv='Content-Security-Policy', content="script-src 'self' https://js.stripe.com 'unsafe-eval'; connect-src 'self'  http://localhost:3000 https://js.stripe.com")
+
+    title Binder
+    link(href='../styles/bootstrap.min.css', rel='stylesheet')
+    link(href='../styles/w3.min.css', rel='stylesheet')
+    link(href='../fonts/Open-Sans/style.css', rel='stylesheet')
+    link(href='../fonts/Montserrat/style.css', rel='stylesheet')
+    link(href='../fonts/Gotham/style.css', rel='stylesheet')
+    link(href='../fonts/Cunia-Bold/style.css', rel='stylesheet')
+    link(href='../fonts/Material-Icons/style.css', rel='stylesheet')
+    link(href='../styles/base.css', rel='stylesheet')
+    link(href='../styles/anim.css', rel='stylesheet')
+    link(href='../styles/home.css', rel='stylesheet')
+    link(href='../styles/plans.css', rel='stylesheet')
+    link(href='../styles/myBinder.css', rel='stylesheet')
+    link(href='../styles/folders.css', rel='stylesheet')
+    link(href='../styles/stats.css', rel='stylesheet')
+    link(href='../styles/help.css', rel='stylesheet')
+    link(href='../styles/download.css', rel='stylesheet')
+    block styles
+    //- script(src="../scripts/jquery-3.4.1.min.js")
+    script(src='../scripts/angular/angular.min.js')
+    script(src='../scripts/angular/angular-route.js')
+    script(src='../scripts/angular/angular-cookies.js')
+    script(src='../scripts/angular/angular-sanitize.min.js')
+    script(src='../scripts/module/contextMenu.js')
+    script(src='../scripts/module/infiniteScroll.js')
+    script(src='../scripts/client.js')
+    script(src='../scripts/controller/home.js')
+    script(src="https://js.stripe.com/v3/")
+    script(src='../scripts/controller/plans.js')
+    script(src='../scripts/controller/myBinder.js')
+    script(src='../scripts/controller/folders.js')
+    script(src='../scripts/controller/stats.js')
+    script(src='../scripts/controller/help.js')
+    script(src='../scripts/controller/download.js')
+
+  body.bg-primary.color-primary
+    #nav
+      .head.color-secondary
+        img(src="../img/logo.png")
+        | Binder
+        .navigation.color-primary
+          i.material-icons(ng-click="G.stageStack.back()", ng-class="{'color-muted': !G.stageStack.canBack}") arrow_back
+          i.material-icons(ng-click="G.stageStack.forward()", ng-class="{'color-muted': !G.stageStack.canForward}") arrow_forward
+      hr
+      .buttons(ng-show="G.user.email")
+        a(ng-click="G.switchStage('home')", ng-class="{'color-accent': G.stageStack.current().startsWith('home')}")
+          i.material-icons home
+          | Home
+        a(ng-click="G.switchStage('folders')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('folders')}")
+          i.material-icons folder_open
+          | Folders
+        a(ng-click="G.switchStage('myBinder')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('myBinder')}")
+          i.material-icons cloud_queue
+          | My Binder
+        a(ng-click="G.switchStage('stats')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('stats')}")
+          i.material-icons trending_up
+          | Stats
+        a(ng-click="G.switchStage('download')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('download')}")
+          i.material-icons file_download
+          | Download
+        a(ng-click="G.switchStage('help')", ng-class="{'color-accent': G.stageStack.current().startsWith('help')}")
+          i.material-icons help_outline
+          | Help
+        a(ng-click="G.switchStage('plans')", ng-class="{'color-accent': G.stageStack.current().startsWith('plans')}")
+          i.material-icons dns
+          | Plans
+        a(ng-click="G.logout()", ng-class="{'color-accent': G.stageStack.current().startsWith('settings')}")
+          i.material-icons settings
+          | Settings
+    .stages
+      ng-include(src="G.stageStack.src")
+    - var horzSpinner = "<div class='lds-ellipsis'><div></div><div></div><div></div><div></div></div>"
+    #errorPopup.popup(class="display:none", ng-if="G.error.visible", ng-class="{'display:flex': true}")
+      .body
+        .error-popup.color-inverse.drop-shadow-strong(ng-class="{'w3-animate-top': true}")
+          | {{G.error.message}}
+          div
+            p
+              span(ng-repeat="p in G.error.messages")
+                | {{p}}
+                br
+          i.material-icons error
+        .dismiss.bg-primary(ng-click="G.error.visible = false", ng-class="{'w3-animate-opacity': true}")
+          | Dismiss
+    #loadingPopup.popup(class="display:none", ng-if="G.loadingPopup.visible", ng-class="{'display:flex': true}")
+      div(ng-class="{'w3-animate-top': opacity}")
+        | !{horzSpinner}
+    #choosePopup.popup(class="display:none", ng-if="G.choose.visible", ng-class="{'display:flex': true}")
+      .body
+        .choose-popup.bg-primary.drop-shadow-strong(ng-class="{'w3-animate-top': zoom}")
+          h3.header.bg-secondary
+            i.material-icons(ng-show="G.choose.type=='file'") folder_open
+            | {{G.choose.parent.name}}
+          .list
+            .item(ng-repeat="child in G.choose.parent.children", ng-click="G.choose.select(child)", ng-class="{'selected': G.choose.selected==child}")
+              i.material-icons.color-muted(ng-show="child.type=='folder'") folder
+              i.material-icons.color-muted(ng-show="child.type=='file'", class="color:#80cbc4") insert_drive_file
+              | {{child.name}}
+          .footer
+            button(ng-show="G.choose.parent.parent", ng-click="G.choose.up()")
+              i.material-icons arrow_upwards
+              | Up
+            button(ng-show="G.choose.stackIndex > 0", ng-click="G.choose.back()")
+              i.material-icons arrow_left
+              | Back
+        .dismiss.bg-primary
+          button.color-red(ng-click="G.choose.cancel()") Cancel
+          button(ng-if="G.choose.selected", ng-click="G.choose.finish()", ng-class="{'w3-animate-opacity': true}") Finish

@@ -1,0 +1,106 @@
+extends layout
+block component
+  #download.stage(ng-controller="downloadCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content.container(ng-if="stage.status == '' && G.user.plan")
+      .header
+        .title
+          h1
+            i.material-icons.color-accent file_download
+            | Download
+      br
+      .actions
+        .action
+          i.material-icons insert_drive_file
+          | Files
+          span.desc (a small set of files)
+          span.size > {{actions.file.minSize}}
+        .action
+          i.material-icons dns
+          | Block
+          span.size ~ {{actions.block.size}}
+        .action
+          i.material-icons donut_small
+          | Everything
+          span.size ~ {{actions.all.size}}
+      br
+      .warnings
+        h1.color-red Warnings
+        br
+        h2 Necessity
+        br
+        p
+          b Please do not request downloads unless you absolutely need to.
+        p
+          | Irrespective of the download size, the entire process can be very resource intensive— 
+          | in order to fufill a download request, a unique download package must first be generated, 
+          | next, the files need to be prepared and transfered to a secure, downloadable location, 
+          | after which, the download package will then need to be assembled and compressed into a smaller internet-friendly size. 
+          | Note, this doesn't include the time it takes for you to actually download and decrypt the package onto your computer.
+        br
+        h2 Download size
+        br
+        p
+          | The 
+          b sizes listed at the top of this page are estimates
+          |  they do not represent exactly how big your download package will be.
+        br
+        h2 Download time
+        br
+        p
+          | We will prepare your files by placing them into a package for download in the background. 
+          | The download package is essentially a single download containing all the files you requested to download. 
+        p
+          | Depending on the size of the download, it can take anywhere between seconds and several hours to prepare your package. 
+          | Estimated package generation and download times are listed below. 
+          i (download times are based on an 80Mbps internet connection)
+          //- gcp = 71.52557373046875 Mb/s , avg local = 9.5367431640625 Mb/s
+        table.times
+          tr
+            td(rowspan="2")
+              | Set of files
+              span.size  ( < 1 Gb )
+            td
+              p
+                b Package generation
+              p Between < 5 seconds and < 15 seconds
+          tr
+            td
+              p
+                b Final download
+              p Between < 2 seconds and < 2 hours
+          tr
+            td(rowspan="2")
+              | Block
+              span.size  ( < 500 Gb )
+            td
+              p
+                b Package generation
+              p Between < 6 minutes and < 2 hours
+          tr
+            td
+              p
+                b Final download
+              p Between < 45 minutes and < 15 hours
+          tr
+            td(rowspan="2")
+              | Everything
+              span.size  ( < 1024 Gb )
+            td
+              p
+                b Package generation
+              p Between < 3 minutes and < 5 hours
+          tr
+            td
+              p
+                b Final download
+              p Between < 18 minutes and < 1.3 days

@@ -1,0 +1,135 @@
+extends layout
+block component
+  #home.stage(ng-controller="homeCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .email-verify.container(ng-if="stage.status == '' && !G.user.email_verified")
+      h1 Home
+      br
+      div
+        code EMAIL NOT VERIFIED
+      br
+      p
+        | You have not yet verified your email address. 
+        | In order to continue using Binder, please verify your email address.
+      h2 How to verify your email
+      p
+        | Look through your email inbox for an email from Binder (Auth0). 
+        | Within that email, there will be a link to verify your email. 
+        | Click that link, and follow the instructions on the webpage when it loads.
+      p
+        | Once, you've verified your email, you must re-login to the binder app using the button below. 
+        | Please know that if you use the button below, and haven't yet verified your email, you will simply return to this page.
+      button.bg-accent.color-inverse(ng-disabled="email.restarting", ng-click="email.onVerified()")
+        i.material-icons done
+        | I've verified my email
+      br
+      br
+      h2 I can't find the email / Email has expired
+      p
+        | If you can't find the email or if the email has expired, click the button below to send a new one.
+      .send-row
+        button.bg-secondary(ng-disabled="email.sending", ng-click="email.resend()") Resend verification email
+        p(ng-show="email.sending || email.sent")
+          .sending(ng-show="email.sending") !{smallCircleSpinner}
+          .sent(ng-show="email.sent")
+            i.material-icons done
+            | Email sent!
+    .no-plan.container(ng-if="stage.status == '' && G.user.email_verified && !G.user.plan")
+      h1 Home
+      br
+      div
+        code NO PLAN DETECTED
+        button.bg-primary.border-accent(ng-click="G.switchStage('plans')") See Plans
+      p
+        br
+        | It seems you have not yet registered a plan for your account.
+        |  If you are not aware, Binder is an Automatic Archiving System that pushes your documents to the cloud, keeping them safe and secure.
+        |  This is especially useful for sensitive projects that you want to keep protected from loss or corruption.
+      h2 How this works
+      br
+      p First you select which folders you want Binder to backup.
+      p
+        | Then you configure, how big you need your Data Blocks to be and how many of them you want. Blocks are chunks of files that Binder manipulates in order to organise and optimise your archive.
+        br
+        i Note: If a Block is too big or too small, access times may be slower.
+      p
+        | Finally, ensure you have a stable internet connection and let Binder perform an initial backup of the folders you've selected.
+        |  When this process completes, you will be able to view statistics and edit your archive in the cloud.
+    .content.container(ng-if="stage.status == '' && G.user.plan")
+      .row.outer-row
+        .uploads.col-md-3
+          h2 Uploads
+          .circle-graph(ng-if="!uploads.current.parts")
+            canvas#circle-graph(width="150", height="150")
+          .parts(ng-if="uploads.current.parts")
+            .part(ng-repeat="part in uploads.current.parts")
+              | Chunk {{$index + 1}}
+              div(ng-prop-id="#small-circle-graph-{{$index+1}}")
+          ng-show(ng-show="uploads.current")
+            h3 {{uploads.current.filename}}
+            .color-muted(ng-show="!uploads.current.isNew") Version: {{uploads.current.version}}
+            .color-muted Size: {{uploads.current.size}}
+          hr
+          h3.queue-title
+            span Queue 
+            span {{uploads.overallPercent}}%
+          ol
+            li(ng-repeat="item in uploads.queue", ng-if="!$index == 0")
+              span {{item.filename}}
+              i {{item.size}}
+        .col-md-9.right-col
+          .space.row
+            .total
+              h2 Storage
+              | {{((space.maxStorage - space.usedStorage) / 1073741824).toFixed(1)}} Gb left
+              .graphic
+                .used-bar.bar(ng-style="{{space.graphicClass}}")
+                .free-bar.bar
+            .blocks
+              h3 Blocks
+              .block(ng-repeat="block in space.blocks", ng-show="$index < 3")
+                span {{$index + 1}}
+                .graphic
+                  .used-bar.bar(ng-style="{{block.graphicClass}}")
+                  .free-bar.bar
+                span {{(block.percentUsed).toFixed(1) > 0 ? (block.percentUsed).toFixed(1) : 0}}%
+              .block.hidden.color-muted(ng-show="space.blocks.length > 3") ... more blocks hidden
+          .row.plan
+            .col-md-4
+              h2 Billing
+              p
+                code {{G.user.plan.maxTotalSize}} Gb
+              p
+                | ${{plan.price}} / 
+                code {{plan.cycle}}
+              p
+                | Next payment:
+                br
+                | {{plan.nextPayment}}
+            .col-md-8.line-graph
+              b.color-muted Viewing data for current period
+              canvas#line-graph(height="150")
+          .row.failed
+            .failed-count.col-md-2(ng-show="false")
+              h3 Failed uploads
+              .count {{uploads.failed.length}}
+            .failed-list.col-md-10
+              h3 Failed uploads
+              .failed-upload(ng-repeat="failed in uploads.failed", ng-show="$index < 3")
+                .text
+                  | {{($index + 1) + ".\t" + failed.filename}}
+                  i.color-muted(ng-show="failed.isNew")  New file
+                .buttons
+                  span(ng-show="failed.retrying") !{smallCircleSpinner}
+                  span.color-accent(ng-show="failed.pendingRetry") Pending retry
+                  button.bg-secondary.color-accent(ng-show="!failed.pendingRetry", ng-click="uploads.failed.retry(failed)")
+                    | Retry now

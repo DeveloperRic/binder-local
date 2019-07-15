@@ -1,0 +1,114 @@
+#myBinder {
+  padding: 30px;
+}
+
+#myBinder .content {
+  display: flex;
+  flex-direction: column;
+}
+
+#myBinder .content .space {
+  display: inline-flex;
+  width: 55%;
+  margin-top: 15px;
+  margin-bottom: 25px;
+  align-items: center;
+}
+
+#myBinder .content .space .graphic {
+  display: inline-flex;
+  flex-grow: 1;
+  height: 10px;
+  margin-right: 10px;
+}
+
+#myBinder .content .blocks {
+  display: flex;
+  width: 70%;
+  flex-direction: column;
+  margin-bottom: 30px;
+}
+
+#myBinder .content .blocks .block {
+  display: flex;
+  padding: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 5px;
+}
+
+#myBinder .content .blocks .block + .block {
+  margin-top: 10px;
+}
+
+#myBinder .content .blocks .block .graphic {
+  display: inline-flex;
+  width: 60px;
+  height: 5px;
+}
+
+#myBinder .content .blocks .block .more {
+  cursor: pointer;
+}
+
+#myBinder .content .blocks .block.merged {
+  filter: brightness(0.6);
+  opacity: 0.15;
+}
+
+#myBinder .content .plan {
+  display: flex;
+  flex-direction: column;
+}
+
+#myBinder .content .plan .overview {
+  padding: 15px;
+}
+
+#myBinder .content .plan .overview p {
+  display: flex;
+  align-items: center;
+}
+
+#myBinder .content .plan .overview i {
+  margin-right: 10px;
+}
+
+#myBinder .content .plan .overview code {
+  margin-left: 10px;
+}
+
+#myBinder .content .plan .bill {
+  max-width: 85%;
+  padding: 15px;
+  border-radius: 7px;
+}
+
+#myBinder .content .plan .bill .payment {
+  display: flex;
+}
+
+#myBinder .content .plan .bill .payment .card {
+  width: 50px;
+  height: 25px;
+  margin-right: 10px;
+  object-fit: contain;
+  object-position: center;
+}
+
+.graphic .bar {
+  height: 100%;
+}
+
+.graphic .used-bar {
+  border-top-left-radius: 7px;
+  border-bottom-left-radius: 7px;
+  background-color: #f44336;
+}
+
+.graphic .free-bar {
+  flex-grow: 1;
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+  background-color: #2196f3;
+}

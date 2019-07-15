@@ -1,0 +1,73 @@
+extends layout
+block component
+  #stats.stage(ng-controller="statsCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content.container(ng-if="stage.status == '' && G.user.plan")
+      .header
+        .title
+          h1
+            i.material-icons.color-accent trending_up
+            | Stats
+      br
+      .filter(ng-if="filter.exists()")
+        p.color-muted
+          | Viewing stats for folder:
+          br
+          i {{filter.folder().path}}
+        div
+          button.bg-secondary(ng-click="filter.clear()") View all stats
+          button.bg-secondary(ng-show="filter.filterStack.length > 1", ng-click="filter.back()") Previous filter
+      br
+      //- TODO increase stats window from 30 days to a partly user-defined range
+      h3.color-muted Based on activity from the last 30 days
+      br
+      .speeds
+        .speed.border-accent
+          h3 Internet speed
+          span(ng-show="speeds.test.obj") {{speeds.test.msg}}
+          span(ng-show="!speeds.test.obj && !speeds.test.success")
+            i.material-icons error
+            | Something went wrong :(
+          p(ng-show="!speeds.test.obj && speeds.test.success")
+            i.material-icons arrow_upward
+            |  {{speeds.internetUp}}
+          p(ng-show="!speeds.test.obj && speeds.test.success")
+            i.material-icons arrow_downward
+            |  {{speeds.internetDown}}
+        .speed.border-accent
+          h3 Archive speed
+          | {{speeds.archive}}
+        .speed.border-accent
+          h3 Update ratio
+          | {{speeds.changes}}
+      br
+      ng-show(ng-show="actives.folders.length > 0")
+        br
+        .actives
+          h2 Most active folders
+          br
+          .active.folder(ng-repeat="folder in actives.folders")
+            div
+              i.material-icons folder
+              | {{folder.path}}
+            button.color-accent(ng-click="filter.set(folder)")
+              | View stats
+            hr
+      br
+      .actives
+        h2 Most active files
+        br
+        .active.file(ng-repeat="file in actives.files")
+          div
+            i.material-icons insert_drive_file
+            | {{file.path}}
+          hr

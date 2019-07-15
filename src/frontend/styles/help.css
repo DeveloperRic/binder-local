@@ -1,0 +1,36 @@
+button i {
+  margin-right: 5px;
+}
+
+#help hr {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+#help .content .container {
+  display: flex;
+  padding: 30px;
+  flex-direction: column;
+}
+
+#help .header {
+  display: flex;
+  height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-image: url("../img/bg-help.jpg");
+  background-attachment: fixed;
+  background-size: cover;
+}
+
+#help .header .title h1 {
+  display: flex;
+  align-items: center;
+}
+
+#help .header .title i {
+  margin-right: 5px;
+  font-size: 28px;
+}
+

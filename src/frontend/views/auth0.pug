@@ -1,0 +1,29 @@
+extends layout
+
+block styles
+  link(rel='stylesheet', href='../styles/auth0.css')
+
+block scripts
+  script(src='../scripts/auth0.js')
+
+block body
+  nav.navbar.fixed-top.navbar-expand-lg.navbar-dark.bg-dark
+    .profile
+      div
+        a.navbar-brand(href='#') Electron App
+      img#picture
+      span#name 
+      button#logout.btn Logout
+  .container-fluid
+    .row
+      .col-sm
+        h1 Electron App
+        p
+          | This Electron application is secured with OpenID Connect and OAuth
+          | 2.0.
+    .row
+      .col-sm
+        #success.alert.alert-success
+        #message.jumbotron
+        button#secured-request.btn.btn-primary
+          | Get Private Message

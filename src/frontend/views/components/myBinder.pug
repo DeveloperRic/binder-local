@@ -1,0 +1,58 @@
+extends layout
+block component
+  #myBinder.stage(ng-controller="myBinderCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content.container(ng-if="stage.status == '' && G.user.plan")
+      h1 My Binder
+      .space
+        .graphic
+          .used-bar.bar(ng-style="{{space.graphicClass}}")
+          .free-bar.bar
+        .text {{(space.maxStorage - space.usedStorage).toFixed(1)}} Gb left
+      br
+      .blocks
+        h2 Blocks
+        br
+        .block.drop-shadow(ng-repeat="block in space.blocks", ng-class="{'merged': block.mergedInto}")
+          i.material-icons dns
+          span.color-muted {{block.mergedInto ? 'Merged' : 'Block ' + ($index + 1)}}
+          .graphic
+            .used-bar.bar(ng-style="{{block.graphicClass}}")
+            .free-bar.bar
+          span.file-count {{block.fileCount}} files
+          span.block-space {{block.usedStorage > 0 ? (block.usedStorage < 1 ? '< 1' : (block.usedStorage).toFixed(1)) : 0}} Gb
+          i.more.material-icons(context-menu='block.contextMenu', context-menu-on="click") more_horiz
+      br
+      .plan
+        h2 Your plan 
+        p
+          code {{plan.name}}
+        br
+        h3 Billing
+        .overview
+          p
+            i.material-icons donut_large
+            | Plan Cycle: {{plan.cycle}}
+          p
+            i.material-icons fast_forward
+            | Next payment: {{plan.nextPayment}}
+        br
+        h3 Recent payments
+        p Up to 12 of the most recent payments we've received for this subscription.
+        .bill.drop-shadow(ng-repeat="bill in plan.invoiceHistory")
+          p
+            b {{bill.formattedDate}}
+          p ${{bill.price}} Pre-authorized
+          .payment
+            img.card(ng-if="bill.card.img", ng-src="../img/{{bill.card.img}}.png")
+            img.card(ng-if="!bill.card.img", ng-src="../img/credit-card.png")
+            | {{bill.card.number}}

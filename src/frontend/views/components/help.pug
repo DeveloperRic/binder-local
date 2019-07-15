@@ -1,0 +1,32 @@
+extends layout
+block component
+  #help.stage(ng-controller="helpCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content(ng-if="stage.status == ''")
+      .header
+        .title
+          h1.color-inverse Help With Binder
+      .container
+        br
+        h2 Guides
+        .guides
+          .guide(ng-repeat="guide in guides", ng-click="G.switchStage(guide.stage)")
+            | {{guide.name}}
+        br
+        h2 Frequently Asked Questions
+        .faqs
+          .faq(ng-repeat="q in faqs", ng-click="q.expanded = !q.expanded")
+            .question
+              i.material-icons(ng-show="!q.expanded") expand_more
+              i.material-icons(ng-show="q.expanded") expand_less
+              | {{q.question}}
+            .answer(ng-show="q.expanded", ng-bind-html="q.answer")
