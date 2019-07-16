@@ -118,10 +118,9 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           ? 4
           : 12;
       billing.status = "loading";
-      //TODO change host url
       $http
         .post(
-          "http://localhost:3000/api/client/plan/purchase",
+          `https://${G.API_DOMAIN}/client/plan/purchase`,
           {
             uid: G.user._id,
             tier: billing.plan.id,

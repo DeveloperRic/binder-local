@@ -1,8 +1,8 @@
 {
-  "name": "my-app",
-  "productName": "my-app",
-  "version": "1.0.0",
-  "description": "My Electron application description",
+  "name": "binder-local",
+  "productName": "Binder",
+  "version": "0.1.0",
+  "description": "Backup files to the cloud",
   "main": "src/electron-main.js",
   "scripts": {
     "start": "electron-forge start",
@@ -12,8 +12,8 @@
     "lint": "echo \"No linting configured\""
   },
   "keywords": [],
-  "author": "Victor",
-  "license": "MIT",
+  "author": "Victor Olaitan",
+  "license": "",
   "config": {
     "forge": {
       "packagerConfig": {},
@@ -21,7 +21,8 @@
         {
           "name": "@electron-forge/maker-squirrel",
           "config": {
-            "name": "my_app"
+            "iconUrl": "http://www.iconj.com/ico/h/p/hpwvy4b6kc.ico",
+            "name": "Binder"
           }
         },
         {

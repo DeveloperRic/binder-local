@@ -29,9 +29,10 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http) {
     const localPublicKey = nacl.randomBytes(32);
     stage.status = "";
     //TODO change host url
+    //  remember to add require("dotenv").config()
     // $http
     //   .post(
-    //     "http://localhost:3000/init/handshake",
+    //     "https://${process.env.BINDER_DOWNLOAD_DOMAIN}/init/handshake",
     //     {
     //       uid: user._id,
     //       localPublicKey

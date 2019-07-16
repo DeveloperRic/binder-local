@@ -42,11 +42,10 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
             return;
           }
           mainBlockId = mainBlockId.id;
-          //TODO change host url
           G.loadingPopup.visible = true;
           $http
             .post(
-              "http://localhost:3000/api/client/plan/mergeBlocks",
+              `https://${G.API_DOMAIN}/client/plan/mergeBlocks`,
               {
                 subBlock: subBlockId,
                 mainBlock: mainBlockId,
@@ -256,10 +255,9 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
           (periodEnd.getMonth() + G.user.plan.lengthInMonths) % 12
         );
         plan.nextPayment = formatDate(periodEnd);
-        //TODO change host url
         $http
           .get(
-            "http://localhost:3000/api/client/plan/invoiceHistory",
+            `https://${G.API_DOMAIN}/client/plan/invoiceHistory`,
             G.oauthHeader({
               params: {
                 subscription: G.user.plan.stripe_subscription_id,
@@ -286,7 +284,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
             });
             $http
               .get(
-                "http://localhost:3000/api/client/plan/cardForInvoice",
+                `https://${G.API_DOMAIN}/client/plan/cardForInvoice`,
                 G.oauthHeader({
                   params: {
                     invoices: invoices,

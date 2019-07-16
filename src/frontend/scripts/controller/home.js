@@ -468,10 +468,9 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
       email.sending = true;
       $interval.cancel(email.sendingTask);
       email.sent = false;
-      // TODO change host url
       $http
         .post(
-          "http://localhost:3000/api/client/auth/sendEmailVerification",
+          `https://${G.API_DOMAIN}/client/auth/sendEmailVerification`,
           { uid: G.profile.sub },
           G.oauthHeader()
         )

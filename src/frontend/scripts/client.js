@@ -33,6 +33,7 @@ app.run(function($rootScope, $cookies) {
   const { clientModels, relaunch, getViewComponentUrl } = remoteRequire(
     "frontend/app/app-process"
   );
+  require("dotenv").config();
   var User = clientModels.User;
   var stageStack = [];
   var stageStackIndex = -1;
@@ -47,6 +48,7 @@ app.run(function($rootScope, $cookies) {
     showPopup,
     oauthHeader,
     require: remoteRequire,
+    API_DOMAIN: process.env.BINDER_API_DOMAIN,
     stripePublishableKey: "pk_test_fX7mdGyHoDRM5jd28IL6nmzF00pXMoMcT9",
     getUser,
     user: {},

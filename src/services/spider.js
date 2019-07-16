@@ -156,7 +156,7 @@ function selectFile(path, include) {
 }
 
 function task() {
-  console.log("spider spawned");
+  // console.log("spider spawned");
   // don't resume process if one is already running
   if (processing) {
     cancelTask();
@@ -166,7 +166,7 @@ function task() {
   }
   // inform future processes we are busy
   processing = true;
-  console.log(" - spider processing");
+  // console.log(" - spider processing");
   let changed = [];
   let removed = [];
   let now = new Date();
