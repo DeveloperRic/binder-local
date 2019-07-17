@@ -196,6 +196,7 @@ function getUser(next) {
     },
     {
       upsert: true,
+      setDefaultsOnInsert: true,
       new: true,
       projection: { _id: 1, "plan.expired": 1, "plan.blocks": 1 }
     },

@@ -182,7 +182,7 @@ app.run(function($rootScope, $cookies) {
           picture: G.profile.picture
         }
       },
-      { upsert: true, new: true },
+      { upsert: true, setDefaultsOnInsert: true, new: true },
       (err, user) => {
         if (err) return callback(err);
         if (!user.email_verified) {

@@ -3,17 +3,27 @@
   "productName": "Binder",
   "version": "0.1.0",
   "description": "Backup files to the cloud",
+  "homepage": "https://binderapp.xyz",
   "main": "src/electron-main.js",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "echo \"No linting configured\""
+    "lint": "echo \"No linting configured\"",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
   },
   "keywords": [],
-  "author": "Victor Olaitan",
   "license": "",
+  "author": {
+    "name": "Victor Olaitan",
+    "email": "victor@binderapp.xyz"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DeveloperRic/binder-local.git"
+  },
   "config": {
     "forge": {
       "packagerConfig": {},
@@ -22,7 +32,8 @@
           "name": "@electron-forge/maker-squirrel",
           "config": {
             "iconUrl": "http://www.iconj.com/ico/h/p/hpwvy4b6kc.ico",
-            "name": "Binder"
+            "name": "Binder",
+            "noMSI": true
           }
         },
         {
@@ -40,6 +51,12 @@
           "config": {}
         }
       ]
+    }
+  },
+  "build": {
+    "appId": "xyz.binderapp.binder",
+    "mac": {
+      "category": "your.app.category.type"
     }
   },
   "dependencies": {

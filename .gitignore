@@ -1,4 +1,5 @@
 node_modules
 out
+src/data/*
 src/frontend/img/Music.zip
 src/frontend/logo.ico
