@@ -1,4 +1,9 @@
-const { app, Tray, Menu, MenuItem, ipcMain } = require("electron");
+// const isSquirrelStartup = require("electron-squirrel-startup");
+// if (isSquirrelStartup) return;
+
+const { app, Tray, Menu, ipcMain } = require("electron");
+
+// if (isSquirrelStartup) return app.quit();
 
 const { createAuthWindow } = require("./frontend/app/auth-process");
 const {
@@ -14,6 +19,19 @@ const spiderService = require("./services/spider-service");
 
 const setupPug = require("electron-pug");
 const mongoose = require("mongoose");
+const AutoLaunch = require("auto-launch");
+
+var autoLauncher = new AutoLaunch({
+  name: "Binder"
+});
+autoLauncher.enable();
+autoLauncher
+  .isEnabled()
+  .then(isEnabled => {
+    if (isEnabled) return;
+    autoLauncher.enable();
+  })
+  .catch(err => {}); // TODO handle error
 
 var User = require("./model/user");
 let initialised = false;
@@ -21,6 +39,7 @@ let initialised = false;
 require("dotenv").config();
 
 // TODO fix problems listed in VSCode problems tab (ctrl+`)
+// TODO delete files in /data before publishing updates
 
 function showWindow(onAuthenticated) {
   authService
@@ -66,10 +85,12 @@ app.on("ready", () => {
                 if (err2) console.error(err2);
                 console.log("![ Some errors occured ]!");
               }
-              if (!showAppWindow()) {
-                createFrontend();
-              }
+              // if (!showAppWindow()) {
+              //   createFrontend();
+              // }
               initialised = true;
+              if (!tray) declareTrayIcon();
+              tray.setToolTip("Binder is running");
               resolve();
             });
           });
@@ -116,7 +137,7 @@ function quit() {
 function declareTrayIcon() {
   tray = new Tray(`${__dirname}/frontend/img/tray-icon.png`); //32x32
   tray.on("click", onTrayClick);
-  tray.setToolTip("Binder is running");
+  tray.setToolTip("Binder is starting");
   tray.setHighlightMode("always");
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -146,7 +167,14 @@ function declareIpcChannels() {
     event.returnValue = true;
   });
   ipcMain.on("spider-directoryStore", (event, arg) => {
-    event.returnValue = spiderService.readOnlyDirectoryStore();
+    spiderService
+      .readOnlyDirectoryStore()
+      .then(directoryStore => {
+        event.reply("spider-directoryStore-res", directoryStore);
+      })
+      .catch(err => {
+        event.reply("spider-directoryStore-err", err);
+      });
   });
   ipcMain.on("upload-event-handlers", (event, arg) => {
     uploadService.setUploadHandlers(arg);
@@ -222,7 +250,7 @@ function startServices({ _id: uid, plan }, next) {
     return next();
   }
   uploadService
-    .init(uid)
+    .init(uid, tray)
     .then(() => {
       console.log("Upload service started & resuming..");
       uploadService

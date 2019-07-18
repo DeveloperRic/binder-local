@@ -7,6 +7,7 @@ const b2 = new (require("backblaze-b2"))({
 });
 const ip = require("ip");
 const pathParse = require("path-parse");
+const { resolveDir } = require("../prodVariables");
 const Tier = require("../model/tier");
 const User = require("../model/user");
 const Bucket = require("../model/bucket");
@@ -117,69 +118,90 @@ function finaliseInit(uid, resolve, reject) {
  * NOTE: Will reject the promise only if an error occurs or the user's status could not be verified.
  * @param {"ObjectId"} uid
  */
-function init(uid) {
+function init(uid, tray) {
   return new Promise((resolve, reject) => {
     userId = uid;
     let schedules = [];
     // get saved schedules
-    fs.readdir("src/data/upload", { withFileTypes: true }, (err, files) => {
-      if (err) throw err;
-      files = files.filter(file => file.isFile());
-      // finalise if no schedules found
-      if (files.length == 0) {
-        initialised = true;
-        return finaliseInit(uid, resolve, reject);
-      }
-      // parse all schedules
-      files.forEach(file => {
-        schedules.push(
-          JSON.parse(fs.readFileSync(`src/data/upload/${file.name}`))
-        );
-      });
-      // sort files within all schedules
-      schedules.forEach(schedule => {
-        schedule.changed = schedule.changed.sort((a, b) => {
-          return (
-            a.modified -
-            b.modified +
-            (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
-          );
-        });
-      });
-      schedules.forEach(schedule => {
-        schedule.removed = schedule.removed.sort((a, b) => {
-          return (
-            a.modified -
-            b.modified +
-            (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
-          );
-        });
-      });
-      // sort schedules
-      schedules = schedules.sort((a, b) => a.created - b.created);
-      // merge all schedules and save them
-      let mergedSchedule = mergeSchedules(schedules);
-      // filter out files that no longer exist
-      // **such files will be detected later by the spider
-      mergedSchedule.changed = mergedSchedule.changed.filter(v =>
-        fs.existsSync(v.path)
+    if (!fs.existsSync(resolveDir("data/upload"))) {
+      return finaliseInit(
+        uid,
+        () => {
+          saveSchedule(currentSchedule = createBlankSchedule())
+            .then(resolve)
+            .catch(reject);
+        },
+        reject
       );
-      saveSchedule(mergedSchedule)
-        .then(() => {
-          // once saved, delete all other schedules
-          files.forEach(file => fs.unlinkSync(`src/data/upload/${file.name}`));
-          // finalise initialisation
-          finaliseInit(
-            uid,
-            () => {
-              currentSchedule = mergedSchedule;
-              resolve();
-            },
-            reject
+    }
+    fs.readdir(
+      resolveDir("data/upload"),
+      { withFileTypes: true },
+      (err, files) => {
+        if (err) return reject(err);
+        files = files.filter(file => {
+          if (file.isFile) return file.isFile();
+          return fs
+            .lstatSync(resolveDir(`data/upload/${file.name || file}`))
+            .isDirectory();
+        });
+        // finalise if no schedules found
+        if (files.length == 0) {
+          return finaliseInit(uid, resolve, reject);
+        }
+        // parse all schedules
+        files.forEach(file => {
+          schedules.push(
+            JSON.parse(fs.readFileSync(resolveDir(`data/upload/${file.name}`)))
           );
-        })
-        .catch(reject);
-    });
+        });
+        // sort files within all schedules
+        schedules.forEach(schedule => {
+          schedule.changed = schedule.changed.sort((a, b) => {
+            return (
+              a.modified -
+              b.modified +
+              (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
+            );
+          });
+        });
+        schedules.forEach(schedule => {
+          schedule.removed = schedule.removed.sort((a, b) => {
+            return (
+              a.modified -
+              b.modified +
+              (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
+            );
+          });
+        });
+        // sort schedules
+        schedules = schedules.sort((a, b) => a.created - b.created);
+        // merge all schedules and save them
+        let mergedSchedule = mergeSchedules(schedules);
+        // filter out files that no longer exist
+        // **such files will be detected later by the spider
+        mergedSchedule.changed = mergedSchedule.changed.filter(v =>
+          fs.existsSync(v.path)
+        );
+        saveSchedule(mergedSchedule)
+          .then(() => {
+            // once saved, delete all other schedules
+            files.forEach(file =>
+              fs.unlinkSync(resolveDir(`data/upload/${file.name}`))
+            );
+            // finalise initialisation
+            finaliseInit(
+              uid,
+              () => {
+                currentSchedule = mergedSchedule;
+                resolve();
+              },
+              reject
+            );
+          })
+          .catch(reject);
+      }
+    );
   });
 }
 
@@ -217,17 +239,21 @@ function mergeSchedules(schedules) {
       } else removedSeen.push(file.path);
     }
   }
-  let mergedSchedule = {
-    changed: [],
-    removed: [],
-    created: new Date().getTime()
-  };
+  let mergedSchedule = createBlankSchedule();
   schedules.forEach(schedule => {
     // merge schedules
     mergedSchedule.changed = mergedSchedule.changed.concat(schedule.changed);
     mergedSchedule.removed = mergedSchedule.removed.concat(schedule.removed);
   });
   return mergedSchedule;
+}
+
+function createBlankSchedule() {
+  return {
+    changed: [],
+    removed: [],
+    created: new Date().getTime()
+  };
 }
 
 /**
@@ -374,7 +400,7 @@ function saveSchedule(schedule) {
 
 function saveScheduleSync(schedule) {
   fs.writeFileSync(
-    `src/data/upload/schedule_${schedule.created}.json`,
+    resolveDir(`data/upload/schedule_${schedule.created}.json`),
     JSON.stringify(schedule)
   );
 }

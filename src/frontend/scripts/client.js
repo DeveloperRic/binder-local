@@ -1,5 +1,4 @@
 var app = angular.module("app", [
-  "ngRoute",
   "ngCookies",
   "ngSanitize",
   "ui.bootstrap.contextMenu",
@@ -13,19 +12,6 @@ WHERE CONSTANTS, STATE_VARS AND COMMONLY-USED FUNCTIONS
 WILL BE HELD.
 */
 
-app.config(function($routeProvider) {
-  // $routeProvider
-  //   .when("/home", {
-  //     templateUrl: "components/home.pug"
-  //   })
-  //   .when("/plans", {
-  //     templateUrl: "components/plans.pug"
-  //   })
-  //   .otherwise({
-  //     templateUrl: "components/home.pug"
-  //   });
-});
-
 app.run(function($rootScope, $cookies) {
   const { remote, ipcRenderer } = require("electron");
   const { getAccessToken, getProfile } = remoteRequire("services/auth-service");
@@ -33,7 +19,6 @@ app.run(function($rootScope, $cookies) {
   const { clientModels, relaunch, getViewComponentUrl } = remoteRequire(
     "frontend/app/app-process"
   );
-  require("dotenv").config();
   var User = clientModels.User;
   var stageStack = [];
   var stageStackIndex = -1;
@@ -48,7 +33,7 @@ app.run(function($rootScope, $cookies) {
     showPopup,
     oauthHeader,
     require: remoteRequire,
-    API_DOMAIN: process.env.BINDER_API_DOMAIN,
+    API_DOMAIN: "api.binderapp.xyz",
     stripePublishableKey: "pk_test_fX7mdGyHoDRM5jd28IL6nmzF00pXMoMcT9",
     getUser,
     user: {},
@@ -80,11 +65,7 @@ app.run(function($rootScope, $cookies) {
     notifyError,
     notifyChoose,
     clientModels: clientModels,
-    ipcRenderer: {
-      send: ipcRenderer.send,
-      sendSync: ipcRenderer.sendSync,
-      on: ipcRenderer.on
-    },
+    ipcRenderer,
     regexEscape,
     refreshCtrl: () => {}
   });

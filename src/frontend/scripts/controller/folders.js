@@ -70,89 +70,108 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
         updates.setUpdating(true);
         folders.status = "loading";
         $scope.$$postDigest(() => {
-          let directoryStore = G.ipcRenderer.sendSync("spider-directoryStore");
-          console.log(directoryStore);
-          const directories = [];
-          directoryStore.active.forEach(directory => {
-            directories.push({
-              path: directory.path,
-              name: smallerPath(fixPathSlashes(directory.path), 20),
-              ignored: directory.files
-                .filter(f => f.ignore)
-                .map(f => {
-                  let filePath = pathParse(f.path);
-                  return {
-                    path: f.path,
-                    name: filePath.name + filePath.ext
-                  };
-                })
-            });
+          let allowResponses = true;
+          G.ipcRenderer.once("spider-directoryStore-err", (event, arg) => {
+            if (!allowResponses) return;
+            allowResponses = false;
+            if (arg) reject(["An error occured", arg]);
+            else reject(["Unknown error occured"]);
           });
-          directoryStore.ignore.forEach(directory => {
-            let existingDir = directories.find(d => d.path == directory.path);
-            if (existingDir) {
-              existingDir.ignored.splice(0, 0, {
-                path: directory.path,
-                name: pathParse(directory.path).name
-              });
+          G.ipcRenderer.once("spider-directoryStore-res", (event, directoryStore) => {
+            if (!allowResponses) return;
+            allowResponses = false;
+            if (!directoryStore) {
+              return reject(["DirStore didn't return anything", directoryStore]);
             }
-          });
-          let parents = new Map();
-          for (let i in directories) {
-            let directory = directories[i];
-            let topParent = "";
-            for (let j in directories) {
-              let dir = directories[j];
-              if (dir.path == directory.path) continue;
-              if (directory.path.startsWith(dir.path)) {
-                if (!topParent || dir.path.length < topParent.length) {
-                  topParent = dir.path;
+            console.log(directoryStore);
+            const directories = [];
+            directoryStore.active.forEach(directory => {
+              directories.push({
+                path: directory.path,
+                name: smallerPath(fixPathSlashes(directory.path), 20),
+                ignored: directory.files
+                  .filter(f => f.ignore)
+                  .map(f => {
+                    let filePath = pathParse(f.path);
+                    return {
+                      path: f.path,
+                      name: filePath.name + filePath.ext
+                    };
+                  })
+              });
+            });
+            directoryStore.ignore.forEach(directory => {
+              let existingDir = directories.find(d => d.path == directory.path);
+              if (existingDir) {
+                existingDir.ignored.splice(0, 0, {
+                  path: directory.path,
+                  name: pathParse(directory.path).name
+                });
+              }
+            });
+            let parents = new Map();
+            for (let i in directories) {
+              let directory = directories[i];
+              let topParent = "";
+              for (let j in directories) {
+                let dir = directories[j];
+                if (dir.path == directory.path) continue;
+                if (directory.path.startsWith(dir.path)) {
+                  if (!topParent || dir.path.length < topParent.length) {
+                    topParent = dir.path;
+                  }
+                }
+              }
+              let isOwnParent = topParent == "";
+              if (isOwnParent) topParent = directory.path;
+              if (parents.has(topParent)) {
+                if (!isOwnParent) {
+                  parents.get(topParent).push(directory.path);
+                }
+              } else {
+                if (isOwnParent) {
+                  parents.set(topParent, []);
+                } else {
+                  parents.set(topParent, [directory.path]);
                 }
               }
             }
-            let isOwnParent = topParent == "";
-            if (isOwnParent) topParent = directory.path;
-            if (parents.has(topParent)) {
-              if (!isOwnParent) {
-                parents.get(topParent).push(directory.path);
-              }
-            } else {
-              if (isOwnParent) {
-                parents.set(topParent, []);
-              } else {
-                parents.set(topParent, [directory.path]);
-              }
+            let groupedDirs = [];
+            let parentsIterator = parents.entries();
+            let group;
+            while ((group = parentsIterator.next().value)) {
+              const parentPath = group[0];
+              const parent = directories.find(dir => dir.path == parentPath);
+              if (!parent) throw new Error("Bad grouping algorithm");
+              parent.subFolders = [];
+              group[1].forEach(childPath => {
+                let child = directories.find(dir => dir.path == childPath);
+                if (!child) throw new Error("Bad grouping algorithm");
+                parent.subFolders.push(child);
+              });
+              groupedDirs.push(parent);
             }
-          }
-          let groupedDirs = [];
-          let parentsIterator = parents.entries();
-          let group;
-          while ((group = parentsIterator.next().value)) {
-            const parentPath = group[0];
-            const parent = directories.find(dir => dir.path == parentPath);
-            if (!parent) throw new Error("Bad grouping algorithm");
-            parent.subFolders = [];
-            group[1].forEach(childPath => {
-              let child = directories.find(dir => dir.path == childPath);
-              if (!child) throw new Error("Bad grouping algorithm");
-              parent.subFolders.push(child);
-            });
-            groupedDirs.push(parent);
-          }
-          folders.list = groupedDirs;
-          console.log(folders.list);
-          folders.status = "";
-          updates.setUpdating(false);
-          resolve();
-          folders.loadTask = $interval(
-            () => {
-              if (folders.autoLoadCount++ < 5) {
-                folders.load();
-              }
-            },
-            60000,
-            1
-          );
+            folders.list = groupedDirs;
+            console.log(folders.list);
+            folders.status = "";
+            updates.setUpdating(false);
+            resolve();
+            folders.loadTask = $interval(
+              () => {
+                if (folders.autoLoadCount++ < 5) {
+                  folders.load();
+                }
+              },
+              60000,
+              1
+            );
+          });
+          $interval(() => {
+            if (!allowResponses) return;
+            (allowResponses = false);
+            reject(["DirStore took too long to respond"]);
+          }, 10000, 1);
+          G.ipcRenderer.send("spider-directoryStore");
         });
       });
     },
@@ -212,7 +231,7 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
       });
     },
     viewStats: folder => {
-      G.switchStage('stats', folder.path);
+      G.switchStage("stats", folder.path);
     }
   });
 
@@ -359,7 +378,9 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
       .catch(args =>
         $scope.$apply(() => {
           stage.status = "error";
-          G.notifyError(args[0], args[1]);
+          if (args) {
+            G.notifyError(args[0], args[1]);
+          }
         })
       );
     $scope.$apply();

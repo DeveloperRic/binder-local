@@ -1,4 +1,4 @@
-const { BrowserWindow } = require("electron");
+const { DEV_MODE, srcDir } = require("../../prodVariables");
 
 /**
  * calls window.loadFile pointing to the view specified
@@ -6,8 +6,10 @@ const { BrowserWindow } = require("electron");
  * @param {string} viewName excluding '.pug'
  */
 function loadView(window, viewName) {
-  window.loadFile(`src/frontend/views/layout.pug`);
-  window.webContents.openDevTools({ mode: "undocked" });
+  window.loadFile(`${srcDir}/frontend/views/layout.pug`);
+  if (DEV_MODE) {
+    window.webContents.openDevTools({ mode: "undocked" });
+  }
 }
 function getViewComponentUrl(viewName) {
   let dir = __dirname;

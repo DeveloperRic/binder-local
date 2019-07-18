@@ -12,7 +12,8 @@
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\"",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "keywords": [],
   "license": "",
@@ -33,7 +34,9 @@
           "config": {
             "iconUrl": "http://www.iconj.com/ico/h/p/hpwvy4b6kc.ico",
             "name": "Binder",
-            "noMSI": true
+            "setupExe": "Binder Setup",
+            "description": "Installing Binder Cloud Backup",
+            "setupIcon": "build/logo.ico"
           }
         },
         {
@@ -55,11 +58,20 @@
   },
   "build": {
     "appId": "xyz.binderapp.binder",
-    "mac": {
-      "category": "your.app.category.type"
+    "productName": "Binder",
+    "directories": {
+      "output": "out"
+    },
+    "extraResources": [
+      "data",
+      "data/*"
+    ],
+    "win": {
+      "icon": "build/logo.ico"
     }
   },
   "dependencies": {
+    "auto-launch": "^5.0.5",
     "backblaze-b2": "^1.3.1",
     "bcryptjs": "^2.4.3",
     "chart.js": "^2.8.0",
@@ -83,6 +95,7 @@
     "@electron-forge/maker-rpm": "^6.0.0-beta.39",
     "@electron-forge/maker-squirrel": "^6.0.0-beta.39",
     "@electron-forge/maker-zip": "^6.0.0-beta.39",
-    "electron": "5.0.3"
+    "electron": "5.0.3",
+    "electron-builder": "^21.0.15"
   }
 }

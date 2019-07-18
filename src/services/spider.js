@@ -1,9 +1,10 @@
 const fs = require("fs");
 const pathParse = require("path-parse");
 const ip = require("ip");
+const { resolveDir } = require("../prodVariables");
 
-var uploadService;
 var File = require("../model/file");
+var uploadService;
 
 let uid;
 var directoryStore;
@@ -49,6 +50,7 @@ function init(options) {
             if (!directoryStore) readDirectoryStore();
             return Object.assign({}, directoryStore);
           },
+          pullDirectoryStore,
           selectDirectory,
           selectFile,
           saveDirectoryStore
@@ -316,7 +318,12 @@ function pullDirectoryStore() {
       let filesToBin = [];
       File.find(
         { owner: uid },
-        { localPath: 1, binned: 1, log: { detected: 1 } },
+        {
+          localPath: 1,
+          binned: 1,
+          "log.detected": 1,
+          "log.lastModifiedTime": 1
+        },
         (err, files) => {
           if (err) return reject(err);
           for (let i in files) {
@@ -349,17 +356,16 @@ function pullDirectoryStore() {
               };
               directoryStore.active.push(dir);
             }
-            let storedFile = dir.find(f => f.path == file.localPath);
+            let storedFile = dir.files.find(f => f.path == file.localPath);
             if (!storedFile) {
               storedFile = {
                 path: file.localPath
               };
               // don't worry, js keeps (storedFile) referenced
               // in the (dir) object, so updates will persist
-              dir.push(storedFile);
+              dir.files.push(storedFile);
             }
-            let fileStat = fs.statSync(storedFile.path);
-            storedFile.mtimeMs = fileStat.mtimeMs;
+            storedFile.mtimeMs = file.log.lastModifiedTime;
             storedFile.ignore = file.binned;
             storedFile.detected = file.log.detected;
           }
@@ -409,19 +415,21 @@ function checkOptions(obj, required) {
 function saveDirectoryStore(onlyIfNew) {
   // only save directories if no schema exists
   if (onlyIfNew && !!directoryStore) return;
-  if (onlyIfNew && fs.existsSync("src/data/directories.json")) return;
+  if (onlyIfNew && fs.existsSync(resolveDir("data/directories.json"))) return;
   let toSave = directoryStore || {
     active: [],
     ignore: []
   };
-  fs.writeFileSync("src/data/directories.json", JSON.stringify(toSave));
+  fs.writeFileSync(resolveDir("data/directories.json"), JSON.stringify(toSave));
   if (onlyIfNew) {
     return (directoryStore = toSave);
   }
 }
 
 function readDirectoryStore() {
-  directoryStore = JSON.parse(fs.readFileSync("src/data/directories.json"));
+  directoryStore = JSON.parse(
+    fs.readFileSync(resolveDir("data/directories.json"))
+  );
 }
 
 module.exports = init;

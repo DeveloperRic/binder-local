@@ -36,8 +36,20 @@ function startSpider(uid, uploadService) {
 }
 
 function readOnlyDirectoryStore() {
-  if (!spider) return null;
-  return spider.readOnlyDirectoryStore();
+  return new Promise((resolve, reject) => {
+    if (!spider) return reject(new Error("spider is undefined"));
+    let store = spider.readOnlyDirectoryStore();
+    if (store) {
+      return resolve(store);
+    } else {
+      spider
+        .pullDirectoryStore()
+        .then(() => {
+          resolve(spider.readOnlyDirectoryStore());
+        })
+        .catch(reject);
+    }
+  });
 }
 
 function selectDirectory(path, include) {

@@ -5,9 +5,9 @@ const keytar = require("keytar");
 const os = require("os");
 require("dotenv").config();
 
-var API_IDENTIFIER = process.env.API_IDENTIFIER;
-var AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
-var CLIENT_ID = process.env.AUTH0_CLIENT_ID;
+var API_IDENTIFIER = "https://binder-local";
+var AUTH0_DOMAIN = "binderapp.auth0.com";
+var CLIENT_ID = "M5PeIwqsIhs0ZZ3vjyrFU9k1Zm3vVWzb";
 
 const REDIRECT_URI = `file:///auth0-callback`;
 
