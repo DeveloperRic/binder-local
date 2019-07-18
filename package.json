@@ -13,10 +13,11 @@
     "lint": "echo \"No linting configured\"",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "release": "electron-builder --publish always"
   },
   "keywords": [],
-  "license": "",
+  "private": true,
   "author": {
     "name": "Victor Olaitan",
     "email": "victor@binderapp.xyz"
@@ -24,6 +25,23 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/DeveloperRic/binder-local.git"
+  },
+  "build": {
+    "appId": "xyz.binderapp.binder",
+    "productName": "Binder",
+    "directories": {
+      "output": "out"
+    },
+    "extraResources": [
+      "data",
+      "data/*"
+    ],
+    "win": {
+      "icon": "build/logo.ico",
+      "publish": [
+        "github"
+      ]
+    }
   },
   "config": {
     "forge": {
@@ -56,28 +74,15 @@
       ]
     }
   },
-  "build": {
-    "appId": "xyz.binderapp.binder",
-    "productName": "Binder",
-    "directories": {
-      "output": "out"
-    },
-    "extraResources": [
-      "data",
-      "data/*"
-    ],
-    "win": {
-      "icon": "build/logo.ico"
-    }
-  },
   "dependencies": {
     "auto-launch": "^5.0.5",
     "backblaze-b2": "^1.3.1",
     "bcryptjs": "^2.4.3",
     "chart.js": "^2.8.0",
     "dotenv": "^8.0.0",
+    "electron-log": "^3.0.6",
     "electron-pug": "^2.0.0",
-    "electron-squirrel-startup": "^1.0.0",
+    "electron-updater": "^4.1.2",
     "ip": "^1.1.5",
     "jwt-decode": "^2.2.0",
     "keytar": "^4.9.0",

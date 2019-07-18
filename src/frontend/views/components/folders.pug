@@ -23,6 +23,11 @@ block component
           .updated
             | Last update was {{updates.formattedLastUpdate}}
       br
+      h2 View files ( α )
+      p
+        | A file explorer is coming soon to binder. 
+        | With this feature, you will be able to visually browse through your folders and files.
+      br
       .folders(ng-show="folders.status == 'loading'")
         | !{horzSpinner}
       .folders(ng-show="folders.status == ''")

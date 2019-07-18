@@ -1,10 +1,16 @@
 // const isSquirrelStartup = require("electron-squirrel-startup");
 // if (isSquirrelStartup) return;
+require("dotenv").config();
 
 const { app, Tray, Menu, ipcMain } = require("electron");
 
 // if (isSquirrelStartup) return app.quit();
+const { autoUpdater } = require("electron-updater");
+autoUpdater.checkForUpdatesAndNotify();
+autoUpdater.logger = require("electron-log");
+autoUpdater.logger.transports.file.level = "info";
 
+const { resolveDir } = require("./prodVariables");
 const { createAuthWindow } = require("./frontend/app/auth-process");
 const {
   createAppWindow,
@@ -17,6 +23,7 @@ const authService = require("./services/auth-service");
 const uploadService = require("./services/upload-service");
 const spiderService = require("./services/spider-service");
 
+const fs = require("fs");
 const setupPug = require("electron-pug");
 const mongoose = require("mongoose");
 const AutoLaunch = require("auto-launch");
@@ -35,8 +42,6 @@ autoLauncher
 
 var User = require("./model/user");
 let initialised = false;
-
-require("dotenv").config();
 
 // TODO fix problems listed in VSCode problems tab (ctrl+`)
 // TODO delete files in /data before publishing updates
@@ -91,6 +96,7 @@ app.on("ready", () => {
               initialised = true;
               if (!tray) declareTrayIcon();
               tray.setToolTip("Binder is running");
+              createFrontend();
               resolve();
             });
           });
@@ -141,8 +147,8 @@ function declareTrayIcon() {
   tray.setHighlightMode("always");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "Open", click: onTrayClick },
-      { label: "Quit", click: quit }
+      { label: "Open Dashboard", click: onTrayClick },
+      { label: "Quit Binder", click: quit }
     ])
   );
   console.log("Declared tray icon");
@@ -245,12 +251,13 @@ function getUser(next) {
 }
 
 function startServices({ _id: uid, plan }, next) {
+  fs.mkdirSync(resolveDir("data"), { recursive: true });
   if (plan && plan.expired) {
     console.log("User's plan has expired, upload+spider services not started");
     return next();
   }
   uploadService
-    .init(uid, tray)
+    .init(uid)
     .then(() => {
       console.log("Upload service started & resuming..");
       uploadService

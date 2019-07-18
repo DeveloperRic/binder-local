@@ -174,9 +174,20 @@ app.run(function($rootScope, $cookies) {
     ).lean(true);
   }
   function logout(callback) {
-    if (!callback) callback = () => {};
-    createLogoutWindow().then(callback);
-    // .then(() => remote.getCurrentWindow().close());
+    setImmediate(() => {
+      if (!callback) {
+        if (
+          !confirm(
+            "Are you sure you want to logout?\nYes, I am aware, this isn't settings lol"
+          )
+        ) {
+          return;
+        }
+        callback = () => G.restart();
+      }
+      createLogoutWindow().then(callback);
+      // .then(() => remote.getCurrentWindow().close());
+    });
   }
   function remoteRequire(module) {
     return remote.require("./" + module);

@@ -64,7 +64,7 @@ html(lang="en", ng-app="app")
           | Stats
         a(ng-click="G.switchStage('download')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('download')}")
           i.material-icons file_download
-          | Download
+          | Download ( α )
         a(ng-click="G.switchStage('help')", ng-class="{'color-accent': G.stageStack.current().startsWith('help')}")
           i.material-icons help_outline
           | Help
