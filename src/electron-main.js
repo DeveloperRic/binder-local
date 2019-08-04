@@ -10,6 +10,8 @@ autoUpdater.checkForUpdatesAndNotify();
 autoUpdater.logger = require("electron-log");
 autoUpdater.logger.transports.file.level = "info";
 
+const { getMongodbKey } = require("./security/keyManagement");
+const { appendSecurityKey } = require("./security/storeSecure");
 const { resolveDir } = require("./prodVariables");
 const { createAuthWindow } = require("./frontend/app/auth-process");
 const {
@@ -22,11 +24,14 @@ const {
 const authService = require("./services/auth-service");
 const uploadService = require("./services/upload-service");
 const spiderService = require("./services/spider-service");
+const downloadService = require("./services/download-service");
 
 const fs = require("fs");
 const setupPug = require("electron-pug");
 const mongoose = require("mongoose");
 const AutoLaunch = require("auto-launch");
+
+const User = require("./model/user");
 
 var autoLauncher = new AutoLaunch({
   name: "Binder"
@@ -40,11 +45,11 @@ autoLauncher
   })
   .catch(err => {}); // TODO handle error
 
-var User = require("./model/user");
 let initialised = false;
 
 // TODO fix problems listed in VSCode problems tab (ctrl+`)
 // TODO delete files in /data before publishing updates
+// TODO tray icon should represent internet/upload/download status
 
 function showWindow(onAuthenticated) {
   authService
@@ -62,13 +67,10 @@ let tray;
 // Some APIs can only be used after this event occurs.
 app.on("ready", () => {
   mongoose
-    .connect(
-      "mongodb+srv://client:dDbUSRI4hPWoPFzH@binder-hkqjh.gcp.mongodb.net/test?retryWrites=true&w=majority",
-      {
-        useNewUrlParser: true,
-        useCreateIndex: true
-      }
-    )
+    .connect(getMongodbKey(), {
+      useNewUrlParser: true,
+      useCreateIndex: true
+    })
     .then(() => console.log("Connected to MongoDB database"))
     .catch(err => console.error("Failed to connect to database", err));
   mongoose.set("useFindAndModify", false);
@@ -83,12 +85,12 @@ app.on("ready", () => {
           getUser((user, err1) => {
             startServices(user, err2 => {
               if (!err1 && !err2) {
-                console.log("=[ Binder has started ]=");
+                console.log("\n=[ Binder has started ]=\n");
               } else {
                 //TODO somehow notify the user of these
                 if (err1) console.error(err1);
                 if (err2) console.error(err2);
-                console.log("![ Some errors occured ]!");
+                console.log("\n![ Some errors occured ]!\n");
               }
               // if (!showAppWindow()) {
               //   createFrontend();
@@ -158,6 +160,9 @@ function declareIpcChannels() {
   ipcMain.on("upload-service", (event, arg) => {
     event.returnValue = uploadService;
   });
+  ipcMain.on("download-service", (event, arg) => {
+    event.returnValue = downloadService;
+  });
   ipcMain.on("spider-select-folder", (event, arg) => {
     if (typeof arg.path === "undefined" || typeof arg.include === "undefined") {
       throw new Error("arg must include 'path' and 'include'");
@@ -182,70 +187,120 @@ function declareIpcChannels() {
         event.reply("spider-directoryStore-err", err);
       });
   });
+  //
+  // --------- upload service
+  //
   ipcMain.on("upload-event-handlers", (event, arg) => {
     uploadService.setUploadHandlers(arg);
   });
   ipcMain.on("upload-status", (event, arg) => {
-    sendMessage("upload-resume", uploadService.currentSchedule());
-    event.returnValue = uploadService.currentSchedule();
+    sendMessage("upload-resume", uploadService.getCurrentSchedule());
+    event.returnValue = uploadService.getCurrentSchedule();
   });
   uploadService.setUploadHandlers({
     resume: schedule => {
-      console.log("==== emitting resume ====");
+      // console.log("==== emitting resume ====");
       sendMessage("upload-resume", schedule);
     },
     progress: (fileDat, partNumber) => {
       sendMessage("upload-progress", fileDat, partNumber);
     },
     success: fileDat => {
-      console.log("==== emitting success ====");
+      // console.log("==== emitting success ====");
       sendMessage("upload-success", fileDat);
     },
     failed: fileDat => {
-      console.log("==== emitting failed ====");
+      // console.log("==== emitting failed ====");
       sendMessage("upload-failed", fileDat);
     },
     allUploaded: schedule => {
-      console.log("==== emitting all-done ====");
+      console.log("\nUpload [all done]\n");
+      // console.log("==== emitting all-done ====");
       sendMessage("upload-all-uploaded", schedule);
     },
     allFailed: schedule => {
-      console.log("==== emitting all-failed ====");
+      console.log("\nUpload [all failed!]\n");
+      // console.log("==== emitting all-failed ====");
       sendMessage("upload-all-failed", schedule);
     }
   });
+  //
+  // ------ download service
+  //
+  ipcMain.on("download-request", (event, ...args) => {
+    downloadService
+      .requestDownload(...args)
+      .then(downloadId => {
+        event.reply("download-request-res", downloadId);
+        console.log(downloadId);
+      })
+      .catch(err => {
+        event.reply("download-request-err", err);
+        console.log(err);
+      });
+  });
+  ipcMain.on("download-event-handlers", (event, arg) => {
+    downloadService.setDownloadHandlers(arg);
+  });
+  // ipcMain.on("download-status", (event, arg) => {
+  //   sendMessage("download-resume", uploadService.getCurrentSchedule());
+  //   event.returnValue = uploadService.getCurrentSchedule();
+  // });
+  // downloadService.setDownloadHandlers({
+  //   resume: schedule => {
+  //     // console.log("==== emitting resume ====");
+  //     sendMessage("upload-resume", schedule);
+  //   },
+  //   captured: (fileDat, partNumber) => {
+  //     sendMessage("upload-progress", fileDat, partNumber);
+  //   },
+  //   released: fileDat => {
+  //     // console.log("==== emitting success ====");
+  //     sendMessage("upload-success", fileDat);
+  //   },
+  //   failed: fileDat => {
+  //     // console.log("==== emitting failed ====");
+  //     sendMessage("upload-failed", fileDat);
+  //   },
+  //   allUploaded: schedule => {
+  //     // console.log("==== emitting all-done ====");
+  //     sendMessage("upload-all-uploaded", schedule);
+  //   },
+  //   allFailed: schedule => {
+  //     // console.log("==== emitting all-failed ====");
+  //     sendMessage("upload-all-failed", schedule);
+  //   }
+  // });
+  //
   console.log("Declared ipc channels");
 }
 
 function getUser(next) {
   let profile = authService.getProfile();
-  User.findOneAndUpdate(
+  User.findOne(
     { email: profile.email },
-    {
-      email_verified: profile.email_verified,
-      profile: {
-        nickname: profile.nickname,
-        picture: profile.picture
-      }
-    },
-    {
-      upsert: true,
-      setDefaultsOnInsert: true,
-      new: true,
-      projection: { _id: 1, "plan.expired": 1, "plan.blocks": 1 }
-    },
+    { _id: 1, "plan.expired": 1, "plan.blocks": 1 },
     (err, user) => {
       if (err) return next(null, err);
-      if (!user) {
-        return next(
-          null,
-          new Error(
-            `user with email ${authService.getProfile().email} not found!`
-          )
-        );
+      if (user) {
+        console.log("Got user");
+        next(user);
+      } else {
+        user = {
+          email: profile.email,
+          email_verified: profile.email_verified,
+          profile: {
+            nickname: profile.nickname,
+            picture: profile.picture
+          }
+        };
+        User.create(appendSecurityKey(user), (err, _user) => {
+          if (err) return next(null, err);
+          console.log("Got user");
+          user._id = _user._id;
+          next(user);
+        });
       }
-      console.log("Got user");
-      next(user);
     }
   ).lean(true);
 }
@@ -256,26 +311,72 @@ function startServices({ _id: uid, plan }, next) {
     console.log("User's plan has expired, upload+spider services not started");
     return next();
   }
+  //ObjectId validator regex /^[a-fA-F0-9]{24}$/
   uploadService
-    .init(uid)
+    .init(
+      uid,
+      downloadService.isPaused,
+      downloadService.isWaiting,
+      downloadService.resume
+    )
     .then(() => {
-      console.log("Upload service started & resuming..");
-      uploadService
-        .pause()
-        .then(uploadService.resume)
-        .catch("Upload service blocked the resume. Possible plan expiry");
-      spiderService
-        .startSpider(uid, uploadService)
+      console.log("Upload service started");
+      downloadService
+        .init(
+          uid,
+          uploadService.isPaused,
+          uploadService.isWaiting,
+          uploadService.resume
+        )
         .then(() => {
-          console.log("Spider started successfully");
-          next();
+          console.log("Download service started");
+          //-----------------------------
+          uploadService
+            .pause()
+            .finally(() => console.log("Upload service resuming"))
+            .then(uploadService.resume)
+            .catch(err => {
+              console.error(
+                "\n",
+                "Upload service blocked the resume. Possible plan expiry\n",
+                err,
+                "\n"
+              );
+            });
+          //-----------------------------
+          console.log("Download service resuming soon..");
+          setImmediate(() => {
+            if (uploadService.isPaused()) {
+              downloadService
+                .pause()
+                .finally(() => console.log("Download service resuming"))
+                .then(downloadService.resume)
+                .catch(err => {
+                  console.error(
+                    "\n",
+                    "Download service blocked the resume. Upload-service might be busy\n",
+                    err,
+                    "\n"
+                  );
+                });
+            } else {
+              console.log(
+                "Refused to resume download service; upload-service is busy"
+              );
+            }
+          });
+          //-----------------------------
+          spiderService
+            .startSpider(uid, uploadService)
+            .then(() => {
+              console.log("Spider started successfully");
+              next();
+            })
+            .catch(err => next(err));
         })
-        .catch(err => {
-          return next(err);
-        });
+        // nothing is allowed to go wrong here!
+        .catch(err => next(err));
     })
     // nothing is allowed to go wrong here!
-    .catch(err => {
-      return next(err);
-    });
+    .catch(err => next(err));
 }

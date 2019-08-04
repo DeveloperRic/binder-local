@@ -73,7 +73,7 @@ block component
           .parts(ng-if="uploads.current.parts")
             .part(ng-repeat="part in uploads.current.parts")
               | Chunk {{$index + 1}}
-              div(ng-prop-id="#small-circle-graph-{{$index+1}}")
+              //- div(ng-prop-id="#small-circle-graph-{{$index+1}}")
           ng-show(ng-show="uploads.current")
             h3 {{uploads.current.filename}}
             .color-muted(ng-show="!uploads.current.isNew") Version: {{uploads.current.version}}

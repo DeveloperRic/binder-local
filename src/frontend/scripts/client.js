@@ -12,6 +12,8 @@ WHERE CONSTANTS, STATE_VARS AND COMMONLY-USED FUNCTIONS
 WILL BE HELD.
 */
 
+//TODO let user know when there's no internet
+
 app.run(function($rootScope, $cookies) {
   const { remote, ipcRenderer } = require("electron");
   const { getAccessToken, getProfile } = remoteRequire("services/auth-service");
@@ -19,6 +21,7 @@ app.run(function($rootScope, $cookies) {
   const { clientModels, relaunch, getViewComponentUrl } = remoteRequire(
     "frontend/app/app-process"
   );
+  const { DEV_MODE, API_DOMAIN } = remoteRequire("prodVariables");
   var User = clientModels.User;
   var stageStack = [];
   var stageStackIndex = -1;
@@ -33,7 +36,7 @@ app.run(function($rootScope, $cookies) {
     showPopup,
     oauthHeader,
     require: remoteRequire,
-    API_DOMAIN: "api.binderapp.xyz",
+    API_DOMAIN,
     stripePublishableKey: "pk_test_fX7mdGyHoDRM5jd28IL6nmzF00pXMoMcT9",
     getUser,
     user: {},
@@ -60,6 +63,7 @@ app.run(function($rootScope, $cookies) {
       visible: false
     },
     loadingPopup: {
+      msg: null,
       visible: false
     },
     notifyError,
@@ -67,6 +71,7 @@ app.run(function($rootScope, $cookies) {
     clientModels: clientModels,
     ipcRenderer,
     regexEscape,
+    dateToTime,
     refreshCtrl: () => {}
   });
   function regexEscape(s) {
@@ -87,7 +92,9 @@ app.run(function($rootScope, $cookies) {
     G.stageStack.canForward = stageStackIndex < stageStack.length - 1;
     G.stageStack.src = stageStack[stageStackIndex].src;
     G.stageStack.switchArgs = {};
-    G.stageStack.switchArgs[stage] = args;
+    if (args.length > 0) {
+      G.stageStack.switchArgs[stage] = args;
+    }
   }
   function stageBack() {
     if (G.stageStack.canBack) {
@@ -103,32 +110,42 @@ app.run(function($rootScope, $cookies) {
       G.stageStack.canForward = stageStackIndex < stageStack.length - 1;
     }
   }
-  function notifyChoose(type, data, onChoose) {
+  function notifyChoose(options, data, onChoose) {
     if (G.choose.visible) {
       G.choose.finish();
     }
     G.choose = {
-      type: type,
+      type: options.type || options,
       visible: true,
       parent: null,
-      selected: null,
+      selections: [],
       stack: [],
       stackIndex: -1,
       back: () => {
         G.choose.stack.pop();
         G.choose.parent = G.choose.stack[--G.choose.stackIndex];
-        G.choose.selected = null;
+        G.choose.selections = [];
       },
       up: () => {
         G.choose.stack.push((G.choose.parent = G.choose.parent.parent));
         G.choose.stackIndex++;
-        G.choose.selected = null;
+        G.choose.selections = [];
       },
       select: item => {
-        G.choose.selected = item;
+        let index = G.choose.selections.indexOf(item);
+        if (index < 0) {
+          if (G.choose.selections.length > 0 && !options.multiSelect) {
+            G.choose.selections.length = 0;
+          }
+          G.choose.selections.push(item);
+        } else {
+          G.choose.selections.splice(index, 1);
+        }
       },
       finish: () => {
-        onChoose(G.choose.selected);
+        onChoose(
+          options.multiSelect ? G.choose.selections : G.choose.selections[0]
+        );
         G.choose = { visible: false };
       },
       start: root => {
@@ -136,7 +153,7 @@ app.run(function($rootScope, $cookies) {
         G.choose.stackIndex++;
       },
       cancel: () => {
-        G.choose.selected = null;
+        G.choose.selections = [];
         G.choose.finish();
       }
     };
@@ -153,20 +170,27 @@ app.run(function($rootScope, $cookies) {
     }
     G.error.visible = true;
   }
-  function getUser(callback) {
-    User.findOneAndUpdate(
+  function getUser(callback, ...projections) {
+    let projection = {
+      email: 1,
+      email_verified: 1
+    };
+    projections.forEach(proj => {
+      projection[proj] = 1;
+    });
+    if (!projection.plan) {
+      projection["plan.expired"] = 1;
+    }
+    User.findOne(
       { email: G.profile.email },
-      {
-        email_verified: G.profile.email_verified,
-        profile: {
-          nickname: G.profile.nickname,
-          picture: G.profile.picture
-        }
-      },
-      { upsert: true, setDefaultsOnInsert: true, new: true },
+      projection,
       (err, user) => {
         if (err) return callback(err);
-        if (!user.email_verified) {
+        if (!user) {
+          return callback(new Error("Logged in user not found in MongoDB"));
+        }
+        if (!user.email_verified || user.plan.expired) {
+          // TODO what happens when a user's plan expires?
           user.plan = null;
         }
         callback(false, user);
@@ -244,5 +268,51 @@ app.run(function($rootScope, $cookies) {
       G.popup = Object.assign(G.popup, options);
     }
   }
-  G.switchStage("home");
+  function dateToTime(date) {
+    let pad = (num, size) => ("000" + num).slice(size * -1);
+    return {
+      hours: pad(date.getHours(), 2),
+      minutes: pad(date.getMinutes(), 2),
+      seconds: pad(date.getSeconds(), 2),
+      ms: pad(date.getMilliseconds(), 3)
+    };
+  }
+  G.shortMonths = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ];
+  G.longMonths = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  G.daysOfWeek = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+  ];
+  G.switchStage(DEV_MODE ? "explore" : "home");
 });

@@ -1,8 +1,4 @@
 var mongoose = require("mongoose");
-var bcrypt = require("bcryptjs");
-
-//TODO copy models into other applications
-// *only copy the models used in the specific application
 
 var planSchema = mongoose.Schema({
   stripe_subscription_id: {
@@ -126,6 +122,10 @@ var userSchema = mongoose.Schema({
   stripe_customer_id: {
     type: String
   },
+  security_key: {
+    type: String,
+    required: true
+  },
   createdDate: {
     type: Number,
     default: () => Date.now()
@@ -133,33 +133,3 @@ var userSchema = mongoose.Schema({
 });
 
 var User = (module.exports = mongoose.model("User", userSchema));
-
-module.exports.createUser = function(newUser, callback) {
-  savePasswordHash(newUser, callback);
-};
-
-module.exports.changePassword = function(uid, password, callback) {
-  this.findById(uid, (err, user) => {
-    if (err) return callback(err, null);
-    user.password = password;
-    savePasswordHash(user, callback);
-  });
-};
-
-function savePasswordHash(user, callback) {
-  bcrypt.genSalt(10, function(err, salt) {
-    if (err) return callback(err);
-    bcrypt.hash(user.password, salt, function(err, hash) {
-      if (err) return callback(err);
-      user.password = hash;
-      user.save(callback);
-    });
-  });
-}
-
-module.exports.comparePassword = function(givenPassword, hash, callback) {
-  bcrypt.compare(givenPassword, hash, function(err, isMatch) {
-    if (err) return callback(err);
-    callback(null, isMatch);
-  });
-};

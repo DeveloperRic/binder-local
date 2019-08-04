@@ -18,6 +18,6 @@ var bucketSchema = mongoose.Schema({
     type: String,
     unique: true
   }
-});
+}, {id: false});
 
 var Bucket = (module.exports = mongoose.model("Bucket", bucketSchema));

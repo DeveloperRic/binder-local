@@ -7,7 +7,7 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
 
   // ---------------------------------------
 
-  $scope.fixPathSlashes = fixPathSlashes;
+  $scope.fixPathSlashes = normalisePath;
   $scope.smallerPath = smallerPath;
 
   var stage = ($scope.stage = {
@@ -174,25 +174,23 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
           };
         }
         console.log(query);
-        File.find(query, { localPath: 1, versions: 1 }, (err, files) => {
+        File.find(query, { localPath: 1, "versions.count": 1 }, (err, files) => {
           if (err) return reject(["Couldn't load active files/folders", err]);
-          let list = files.map(file => {
-            let versionCount = file.versions.length;
-            delete file.versions;
+          files = files.map(file => {
             return {
               path: file.localPath,
-              versionCount: versionCount
+              versionCount: file.versions.count
             };
           });
           actives.folders.length = 0;
           actives.files.length = 0;
-          list.forEach(item => {
+          files.forEach(item => {
             let dir = pathParse(item.path).dir;
             let folder = actives.folders.find(f => f.actualPath == dir);
             if (!folder) {
               actives.folders.push({
                 actualPath: dir,
-                path: smallerPath(fixPathSlashes(dir), 30),
+                path: smallerPath(normalisePath(dir), 30),
                 versionCount: item.versionCount
               });
             } else {
@@ -200,7 +198,7 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
             }
             actives.files.push({
               actualPath: item.path,
-              path: smallerPath(fixPathSlashes(item.path), 30),
+              path: smallerPath(normalisePath(item.path), 30),
               versionCount: item.versionCount
             });
           });
@@ -251,7 +249,7 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
         let path = G.stageStack.switchArgs.stats[0];
         if (path) {
           filter.set(
-            { actualPath: path, path: smallerPath(fixPathSlashes(path), 30) },
+            { actualPath: path, path: smallerPath(normalisePath(path), 30) },
             true
           );
         }
@@ -260,7 +258,7 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
     });
   }
 
-  function fixPathSlashes(path) {
+  function normalisePath(path) {
     return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");
   }
 

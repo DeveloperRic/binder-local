@@ -55,7 +55,7 @@ block component
         .actives
           h2 Most active folders
           br
-          .active.folder(ng-repeat="folder in actives.folders")
+          .active.folder.w3-animate-opacity(ng-repeat="folder in actives.folders")
             div
               i.material-icons folder
               | {{folder.path}}
@@ -66,7 +66,7 @@ block component
       .actives
         h2 Most active files
         br
-        .active.file(ng-repeat="file in actives.files")
+        .active.file.w3-animate-opacity(ng-repeat="file in actives.files")
           div
             i.material-icons insert_drive_file
             | {{file.path}}

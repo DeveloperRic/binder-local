@@ -1,0 +1,120 @@
+/* TODO empty list graphic for all lists in the electron app */
+
+#explore {
+  display: flex;
+  flex-direction: column;
+}
+
+#explore hr {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+#explore .content {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+#explore .header {
+  display: flex;
+  padding: 20px 10px 10px 20px;
+  align-items: center;
+}
+
+#explore .header .back {
+  margin-right: 15px;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+#explore .header .title {
+  margin-right: 10px;
+}
+
+#explore .header .title * {
+  font-size: 20px;
+}
+
+#explore .header .title h1 {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0;
+  align-items: center;
+}
+
+#explore .header .title i {
+  margin-right: 5px;
+}
+
+#explore .header .path h3 {
+  margin: 0;
+}
+
+#explore .list {
+  display: flex;
+  flex-grow: 1;
+  padding-top: 30px;
+  padding-bottom: 30px;
+  flex-direction: column;
+}
+
+#explore .list .item {
+  display: flex;
+  padding: 5px 40px 5px 30px;
+  justify-content: space-between;
+}
+
+#explore .list .item:hover {
+  background-color: #eeeeee;
+}
+#explore .list .item:hover .name .text {
+  font-weight: 600;
+}
+body.darkmode #explore .list .item:hover {
+  background-color: #313131;
+}
+
+#explore .list .item .name {
+  display: flex;
+  align-items: center;
+}
+
+#explore .list .item .name i {
+  margin-right: 10px;
+}
+
+#explore .list .item .more {
+  display: flex;
+  margin-right: 5px;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+#explore .list .item .more i {
+  margin-left: 25px;
+}
+
+#explore .list .item .more i:hover {
+  color: #4caf50;
+}
+
+#explore .list .folder:hover {
+  cursor: pointer;
+}
+
+#explore .list .folder .name i {
+  color: #1de9b6;
+}
+
+#explore .list .file:hover {
+  cursor: default;
+}
+#explore .list .file.bg-accent-light:hover {
+  background-color: #c8e6c9;
+}
+
+#explore .list .file .name i {
+  color: #80cbc4;
+}

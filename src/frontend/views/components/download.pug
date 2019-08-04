@@ -22,21 +22,70 @@ block component
       p
         | Downloads, although essential to Binder, are not yet ready for production.
         | Please wait until a future feature update to test downloads.
-      br
-      .actions
-        .action
-          i.material-icons insert_drive_file
-          | Files
-          span.desc (a small set of files)
-          span.size > {{actions.file.minSize}}
-        .action
-          i.material-icons dns
-          | Block
-          span.size ~ {{actions.block.size}}
-        .action
-          i.material-icons donut_small
-          | Everything
-          span.size ~ {{actions.all.size}}
+      ng-show(ng-show="false && !status.progress")
+        h3 I want to download..
+        br
+        .actions
+          .action.drop-shadow(ng-click="actions.downloadFiles()")
+            i.material-icons.color-accent insert_drive_file
+            h3 Files
+            span.desc (a small set of files)
+          .action.drop-shadow(ng-click="actions.downloadBlock()")
+            i.material-icons.color-accent dns
+            h3 Block
+            span.desc (a large set of files)
+          .action.drop-shadow(ng-click="actions.downloadBinder()")
+            i.material-icons.color-accent donut_small
+            h3 Everything
+            span.desc (eveything in your binder)
+      ng-show(ng-show="false && status.progress")
+        h3 Download request
+        .progress(ng-show="!status.progress.isReady")
+          .list
+            .item(ng-class="{'color-accent': status.progress.started}")
+              i.material-icons schedule
+              | Started
+              .date.color-muted(ng-show="!status.progress.started")
+                | Pending
+            .next
+              i.material-icons(ng-class="{true: 'color-accent', false: 'color-muted'}[status.progress.packaged || (status.progress.current.step=='package'&&status.progress.current.left)]")
+                | chevron_right
+              i.material-icons(ng-class="{true: 'color-accent', false: 'color-muted'}[status.progress.packaged || (status.progress.current.step=='package'&&status.progress.current.right)]")
+                | chevron_right
+            .item(ng-class="{'color-accent': status.progress.packaged}")
+              i.material-icons layers
+              | Packaged
+              .date.color-muted(ng-show="!status.progress.packaged")
+                | {{status.progress.started ? 'In progress' : 'Pending'}}
+            .next
+              i.material-icons(ng-class="{true: 'color-accent', false: 'color-muted'}[status.progress.downloaded || (status.progress.current.step=='download'&&status.progress.current.left)]")
+                | chevron_right
+              i.material-icons(ng-class="{true: 'color-accent', false: 'color-muted'}[status.progress.downloaded || (status.progress.current.step=='download'&&status.progress.current.right)]")
+                | chevron_right
+            .item(ng-class="{'color-accent': status.progress.downloaded}")
+              i.material-icons file_download
+              | Downloaded
+              .date.color-muted(ng-show="!status.progress.downloaded")
+                | {{status.progress.packaged ? 'In progress' : 'Pending'}}
+            .next
+              i.material-icons(ng-class="{true: 'color-accent', false: 'color-muted'}[status.progress.current.step=='decrypt'&&status.progress.current.left]")
+                | chevron_right
+              i.material-icons(ng-class="{true: 'color-accent', false: 'color-muted'}[status.progress.current.step=='decrypt'&&status.progress.current.right]")
+                | chevron_right
+            .item
+              i.material-icons https
+              | Decrypted
+              .date.color-muted
+                | {{status.progress.downloaded ? 'In progress' : 'Pending'}}
+          .deadline
+            | Ready for download by {{status.progress.packageBy}}
+        .progress(ng-show="status.progress.isReady")
+          .item
+            i.material-icons done_all
+            | Your download has completed :)
+            br
+            button.bg-accent.color-inverse(ng-click="status.showDownload()")
+              | Show files
       br
       .warnings
         h1.color-red Warnings
@@ -46,11 +95,10 @@ block component
         p
           b Please do not request downloads unless you absolutely need to.
         p
-          | Irrespective of the download size, the entire process can be very resource intensive— 
-          | in order to fufill a download request, a unique download package must first be generated, 
-          | next, the files need to be prepared and transfered to a secure, downloadable location, 
-          | after which, the download package will then need to be assembled and compressed into a smaller internet-friendly size. 
-          | Note, this doesn't include the time it takes for you to actually download and decrypt the package onto your computer.
+          | Irrespective of the download size, the entire process can be very resource intensive. 
+          | In order to fufill a download request, we first transfer the files from our data store to a secure cloud location and package them into a smaller internet-friendly size. 
+          | Next, Binder downloads that package onto your machine and begins decrypting the files locally. 
+          | Once this is completed, you will be notified that your files are ready.
         br
         h2 Download size
         br
@@ -68,7 +116,7 @@ block component
           | Depending on the size of the download, it can take anywhere between seconds and several hours to prepare your package. 
           | Estimated package generation and download times are listed below. 
           i (download times are based on an 80Mbps internet connection)
-          //- gcp = 71.52557373046875 Mb/s , avg local = 9.5367431640625 Mb/s
+          //- gcp = 71.52557373046875 Mb/s , avg local = 9.5367431640625 Mb/s TODO: avg is actually 10Mb/s
         table.times
           tr
             td(rowspan="2")

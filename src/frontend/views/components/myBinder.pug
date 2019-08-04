@@ -22,7 +22,7 @@ block component
       .blocks
         h2 Blocks
         br
-        .block.drop-shadow(ng-repeat="block in space.blocks", ng-class="{'merged': block.mergedInto}")
+        .block.drop-shadow.w3-animate-opacity(ng-repeat="block in space.blocks", ng-class="{'merged': block.mergedInto}")
           i.material-icons dns
           span.color-muted {{block.mergedInto ? 'Merged' : 'Block ' + ($index + 1)}}
           .graphic
@@ -48,7 +48,7 @@ block component
         br
         h3 Recent payments
         p Up to 12 of the most recent payments we've received for this subscription.
-        .bill.drop-shadow(ng-repeat="bill in plan.invoiceHistory")
+        .bill.drop-shadow.w3-animate-opacity(ng-repeat="bill in plan.invoiceHistory")
           p
             b {{bill.formattedDate}}
           p ${{bill.price}} Pre-authorized

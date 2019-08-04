@@ -76,29 +76,44 @@ var fileSchema = mongoose.Schema({
   latestSize: {
     type: Number,
     min: 0,
-    default: this.originalSize
+    default: () => this.originalSize
   },
   versions: {
-    type: [
-      {
-        idInDatabase: {
-          type: String,
-          required: true
-        },
-        dateInserted: {
-          type: Number,
-          required: true
-        },
-        dateDeleted: {
-          type: Number
-        },
-        originalSize: {
-          type: Number,
-          required: true
+    list: {
+      type: [
+        {
+          idInDatabase: {
+            type: String,
+            required: true
+          },
+          dateInserted: {
+            type: Number,
+            required: true
+          },
+          dateDeleted: {
+            type: Number
+          },
+          originalSize: {
+            type: Number,
+            required: true
+          }
         }
-      }
-    ],
-    default: []
+      ],
+      default: []
+    },
+    count: {
+      type: Number,
+      min: 0,
+      default: 0,
+      set: v => Math.floor(v)
+    },
+    activeCount: {
+      type: Number,
+      min: 0,
+      validate: v => v <= this.versions.count,
+      default: 0,
+      set: v => Math.floor(v)
+    }
   },
   log: {
     detected: {
@@ -106,28 +121,60 @@ var fileSchema = mongoose.Schema({
       index: true
     },
     updateHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     binnedHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     restoredHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     lastestSizeCalculationDate: {
       type: Number
     },
     sizeHistory: {
-      type: [
-        {
-          date: { type: Number, required: true },
-          size: { type: Number, required: true }
-        }
-      ],
-      default: []
+      list: {
+        type: [
+          {
+            date: { type: Number, required: true },
+            size: { type: Number, required: true }
+          }
+        ],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     dateDeleted: {
       type: Number

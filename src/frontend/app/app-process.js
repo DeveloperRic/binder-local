@@ -5,6 +5,7 @@ var User = require("../../model/user");
 var Block = require("../../model/block");
 var Tier = require("../../model/tier");
 var File = require("../../model/file");
+var Download = require("../../model/download");
 let win;
 let relaunchFunction;
 
@@ -14,7 +15,8 @@ function createAppWindow(onClose, relaunchFunc) {
     height: 600,
     webPreferences: {
       nodeIntegration: true
-    }
+    },
+    autoHideMenuBar: true
   });
 
   appUtils.loadView(win, "home");
@@ -69,8 +71,8 @@ module.exports = {
   relaunch: () => relaunchFunction(),
   clientModels: {
     User: {
-      findOneAndUpdate: (query, doc, options, callback) => {
-        return User.findOneAndUpdate(query, doc, options, callback);
+      findOne: (query, projection, callback) => {
+        return User.findOne(query, projection, callback);
       },
       create: (doc, callback) => {
         return User.create(doc, callback);
@@ -92,6 +94,14 @@ module.exports = {
     File: {
       find: (query, projection, callback) => {
         return File.find(query, projection, callback);
+      },
+      aggregate: (aggregations, callback) => {
+        return File.aggregate(aggregations, callback);
+      }
+    },
+    Download: {
+      findOne: (query, projection, callback) => {
+        return Download.findOne(query, projection, callback);
       }
     }
   }

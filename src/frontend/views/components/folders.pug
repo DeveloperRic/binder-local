@@ -23,10 +23,14 @@ block component
           .updated
             | Last update was {{updates.formattedLastUpdate}}
       br
-      h2 View files ( α )
       p
-        | A file explorer is coming soon to binder. 
-        | With this feature, you will be able to visually browse through your folders and files.
+        | Open the file explorer to perform specific actions on files.
+        br
+        | e.g.) deletions and roll-backs
+        br
+        br
+        button.border-accent(ng-click="G.switchStage('explore')")
+          | Open file Explorer
       br
       .folders(ng-show="folders.status == 'loading'")
         | !{horzSpinner}
@@ -52,7 +56,7 @@ block component
           .remove
             button.color-accent(ng-disabled="!folders.addFolderPath || folders.addStatus=='adding'", ng-click="folders.finishAdd()") Backup folder
         //---------- folder list
-        .folder(ng-repeat="folder in folders.list", ng-show="$index < 12 || folders.showAll")
+        .folder.w3-animate-opacity(ng-repeat="folder in folders.list", ng-show="$index < 12 || folders.showAll")
           .main
             .expand
               i.material-icons folder
@@ -86,7 +90,7 @@ block component
       .history
         h2 History
         br
-        .history-item(ng-repeat="item in history.list")
+        .history-item.w3-animate-opacity(ng-repeat="item in history.list")
           .info
             span.date.color-muted {{item.formattedDate}}
             |  {{item.action}}

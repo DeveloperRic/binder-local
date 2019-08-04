@@ -4,9 +4,10 @@ html(lang="en", ng-app="app")
     meta(charset='UTF-8')
     meta(name='viewport', content='width=device-width, initial-scale=1.0')
     meta(http-equiv='X-UA-Compatible', content='ie=edge')
-    meta(http-equiv='Content-Security-Policy', content="script-src 'self' https://js.stripe.com 'unsafe-eval'; connect-src 'self' https://api.binderapp.xyz  https://js.stripe.com")
+    meta(http-equiv='Content-Security-Policy', content="script-src 'self' https://js.stripe.com 'unsafe-eval'; connect-src 'self' https://api.binderapp.xyz https://js.stripe.com http://localhost:3000")
 
     title Binder
+    
     link(href='../styles/bootstrap.min.css', rel='stylesheet')
     link(href='../styles/w3.min.css', rel='stylesheet')
     link(href='../fonts/Open-Sans/style.css', rel='stylesheet')
@@ -23,6 +24,7 @@ html(lang="en", ng-app="app")
     link(href='../styles/stats.css', rel='stylesheet')
     link(href='../styles/help.css', rel='stylesheet')
     link(href='../styles/download.css', rel='stylesheet')
+    link(href='../styles/explore.css', rel='stylesheet')
     block styles
     //- script(src="../scripts/jquery-3.4.1.min.js")
     script(src='../scripts/angular/angular.min.js')
@@ -39,6 +41,7 @@ html(lang="en", ng-app="app")
     script(src='../scripts/controller/stats.js')
     script(src='../scripts/controller/help.js')
     script(src='../scripts/controller/download.js')
+    script(src='../scripts/controller/explore.js')
 
   body.bg-primary.color-primary
     #nav
@@ -49,10 +52,10 @@ html(lang="en", ng-app="app")
           i.material-icons(ng-click="G.stageStack.back()", ng-class="{'color-muted': !G.stageStack.canBack}") arrow_back
           i.material-icons(ng-click="G.stageStack.forward()", ng-class="{'color-muted': !G.stageStack.canForward}") arrow_forward
       hr
-      .buttons(ng-show="G.user.email")
+      .buttons.color-secondary(ng-show="G.user.email")
         a(ng-click="G.switchStage('home')", ng-class="{'color-accent': G.stageStack.current().startsWith('home')}")
           i.material-icons home
-          | Home
+          | Home ( α )
         a(ng-click="G.switchStage('folders')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('folders')}")
           i.material-icons folder_open
           | Folders
@@ -74,7 +77,7 @@ html(lang="en", ng-app="app")
         a(ng-click="G.logout()", ng-class="{'color-accent': G.stageStack.current().startsWith('settings')}")
           i.material-icons settings
           | Settings
-    .stages
+    .stages.bg-secondary-light
       ng-include(src="G.stageStack.src")
     - var horzSpinner = "<div class='lds-ellipsis'><div></div><div></div><div></div><div></div></div>"
     #errorPopup.popup(class="display:none", ng-if="G.error.visible", ng-class="{'display:flex': true}")
@@ -91,6 +94,7 @@ html(lang="en", ng-app="app")
           | Dismiss
     #loadingPopup.popup(class="display:none", ng-if="G.loadingPopup.visible", ng-class="{'display:flex': true}")
       div(ng-class="{'w3-animate-top': opacity}")
+        h3.bg-secondary(ng-show="G.loadingPopup.msg") {{G.loadingPopup.msg}}
         | !{horzSpinner}
     #choosePopup.popup(class="display:none", ng-if="G.choose.visible", ng-class="{'display:flex': true}")
       .body
@@ -99,7 +103,7 @@ html(lang="en", ng-app="app")
             i.material-icons(ng-show="G.choose.type=='file'") folder_open
             | {{G.choose.parent.name}}
           .list
-            .item(ng-repeat="child in G.choose.parent.children", ng-click="G.choose.select(child)", ng-class="{'selected': G.choose.selected==child}")
+            .item(ng-repeat="child in G.choose.parent.children", ng-click="G.choose.select(child)", ng-class="{'selected': G.choose.selections.includes(child)}")
               i.material-icons.color-muted(ng-show="child.type=='folder'") folder
               i.material-icons.color-muted(ng-show="child.type=='file'", class="color:#80cbc4") insert_drive_file
               | {{child.name}}
@@ -112,4 +116,4 @@ html(lang="en", ng-app="app")
               | Back
         .dismiss.bg-primary
           button.color-red(ng-click="G.choose.cancel()") Cancel
-          button(ng-if="G.choose.selected", ng-click="G.choose.finish()", ng-class="{'w3-animate-opacity': true}") Finish
+          button(ng-if="G.choose.selections.length > 0", ng-click="G.choose.finish()", ng-class="{'w3-animate-opacity': true}") Finish

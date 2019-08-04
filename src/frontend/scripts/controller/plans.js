@@ -120,7 +120,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
       billing.status = "loading";
       $http
         .post(
-          `https://${G.API_DOMAIN}/client/plan/purchase`,
+          `${G.API_DOMAIN}/client/plan/purchase`,
           {
             uid: G.user._id,
             tier: billing.plan.id,

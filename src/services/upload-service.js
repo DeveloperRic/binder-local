@@ -1,28 +1,38 @@
 const fs = require("fs");
 const crypto = require("crypto");
-const mime = require("mime-types");
-const b2 = new (require("backblaze-b2"))({
-  accountId: "002d12b0f670f5c0000000001", // or accountId
-  applicationKey: "K002rxvrTjAQtnrFRJTcTss/PiWwqKY"
-});
 const ip = require("ip");
+const mime = require("mime-types");
 const pathParse = require("path-parse");
+const mongoose = require("mongoose");
+
+const { isLargeFile, countPartsForLargeFile } = require("./coordination.js");
+const { getB2Key } = require("../security/keyManagement");
+const { encryptAndCompress } = require("../security/storeSecure");
 const { resolveDir } = require("../prodVariables");
+
+const b2 = new (require("backblaze-b2"))(getB2Key());
+
 const Tier = require("../model/tier");
 const User = require("../model/user");
 const Bucket = require("../model/bucket");
 const Block = require("../model/block");
 const File = require("../model/file");
 
+const UPLOAD_DIR = resolveDir("data/upload");
+
 let currentSchedule;
 let paused = true;
 let uploading = false;
 let processedUpload = true;
 let allowProcessing = true;
+let waiting = false;
 let allowedBlocks = [];
 let userId;
 let userTier;
 var initialised = false;
+let isDownloadsPaused;
+let isDownloadsWaiting;
+let downloadsResume;
 let uploadHandlers = {
   resume: null,
   progress: null,
@@ -39,159 +49,162 @@ let throttler = {
 // NOTE timeouts on all local processes (?)
 // e.g.) pause() and resume()
 
-function finaliseInit(uid, resolve, reject) {
-  // get user info for use in uploads
-  User.findById(uid, { plan: 1 }, (err, user) => {
-    if (err) return reject(err);
-    if (!user) return reject(new Error("User not found"));
-    if (!user.plan) {
-      return reject(new Error("User doesn't have a plan"));
-    } else if (user.plan.expired) {
-      return reject(new Error("User's plan has expired"));
-    }
-    // get user's blocks for use in uploads
-    Block.find(
-      { _id: { $in: user.plan.blocks } },
-      { _id: 1, bucket: 1, maxSize: 1, latestSize: 1 },
-      (err, blocks) => {
-        if (err) return reject(err);
-        if (blocks.length == 0) {
-          return reject(new Error("No allowed blocks found"));
-        }
-        // get associated buckets for b2_bucket_id selection
-        Bucket.find(
-          { _id: { $in: blocks.map(bl => bl.bucket) } },
-          { _id: 1, b2_bucket_id: 1 },
-          (err, buckets) => {
-            if (err) return reject(err);
-            if (buckets.length == 0) {
-              return reject(
-                new Error("No allowed buckets found / bucket mismatch")
-              );
-            }
-            allowedBlocks.length = 0;
-            // ensure correct retrieval of blocks and their buckets
-            for (let i in blocks) {
-              const block = blocks[i];
-              let bucket = buckets.find(
-                bu => bu._id.toString() == block.bucket
-              );
-              if (!bucket) {
-                return reject(new Error("Bucket mismatch"));
-              }
-              allowedBlocks.push({
-                _id: block._id.toString(),
-                bucket: {
-                  _id: bucket._id.toString(),
-                  b2_bucket_id: bucket.b2_bucket_id
-                },
-                maxSize: block.maxSize
-              });
-            }
-            // get user's plan tier info for version control
-            // and archive throttling
-            Tier.findOne(
-              { id: user.plan.tier },
-              { archiveSpeed: 1, fileVersioningAllowed: 1 },
-              (err, tier) => {
-                if (err) return reject(err);
-                if (!tier) return reject(new Error("Failed to load Tier data"));
-                userTier = tier;
-                b2.authorize()
-                  .then(() => {
-                    initialised = true;
-                    resolve();
-                  })
-                  .catch(reject);
-              }
-            );
-          }
-        ).lean(true);
-      }
-    );
-  });
-}
-
 /**
  * Initialises the upload-service, resuming uploads,
  * setting state variables, and verifing user's plan status.
  * NOTE: Will reject the promise only if an error occurs or the user's status could not be verified.
  * @param {"ObjectId"} uid
+ * @param {function} downloadsPaused
  */
-function init(uid) {
+function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
   return new Promise((resolve, reject) => {
-    userId = uid;
+    userId = uid.toString();
+    isDownloadsPaused = downloadsPaused;
+    isDownloadsWaiting = downloadsWaiting;
+    downloadsResume = downloadResume;
     let schedules = [];
     // get saved schedules
-    fs.mkdir(resolveDir("data/upload"), { recursive: true }, err => {
+    fs.mkdir(UPLOAD_DIR, { recursive: true }, err => {
       if (err) return reject(err);
-      fs.readdir(
-        resolveDir("data/upload"),
-        { withFileTypes: true },
-        (err, files) => {
-          if (err) return reject(err);
-          files = files.filter(file => file.isFile());
-          // finalise if no schedules found
-          if (files.length == 0) {
-            return finaliseInit(uid, resolve, reject);
-          }
-          // parse all schedules
-          files.forEach(file => {
-            schedules.push(
-              JSON.parse(
-                fs.readFileSync(resolveDir(`data/upload/${file.name}`))
-              )
+      fs.readdir(UPLOAD_DIR, { withFileTypes: true }, (err, files) => {
+        if (err) return reject(err);
+        files = files.filter(file => file.isFile());
+        // finalise if no schedules found
+        if (files.length == 0) {
+          return finaliseInit(uid, resolve, reject);
+        }
+        // parse all schedules
+        files.forEach(file => {
+          schedules.push(
+            JSON.parse(fs.readFileSync(`${UPLOAD_DIR}/${file.name}`))
+          );
+        });
+        // sort files within all schedules
+        schedules.forEach(schedule => {
+          schedule.changed = schedule.changed.sort((a, b) => {
+            return (
+              a.modified -
+              b.modified +
+              (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
             );
           });
-          // sort files within all schedules
-          schedules.forEach(schedule => {
-            schedule.changed = schedule.changed.sort((a, b) => {
-              return (
-                a.modified -
-                b.modified +
-                (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
-              );
-            });
+        });
+        schedules.forEach(schedule => {
+          schedule.removed = schedule.removed.sort((a, b) => {
+            return (
+              a.modified -
+              b.modified +
+              (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
+            );
           });
-          schedules.forEach(schedule => {
-            schedule.removed = schedule.removed.sort((a, b) => {
-              return (
-                a.modified -
-                b.modified +
-                (a.bytes.total - a.bytes.done - (b.bytes.total - b.bytes.done))
-              );
-            });
-          });
-          // sort schedules
-          schedules = schedules.sort((a, b) => a.created - b.created);
-          // merge all schedules and save them
-          let mergedSchedule = mergeSchedules(schedules);
-          // filter out files that no longer exist
-          // **such files will be detected later by the spider
-          mergedSchedule.changed = mergedSchedule.changed.filter(v =>
-            fs.existsSync(v.path)
-          );
-          saveSchedule(mergedSchedule)
-            .then(() => {
-              // once saved, delete all other schedules
-              files.forEach(file =>
-                fs.unlinkSync(resolveDir(`data/upload/${file.name}`))
-              );
-              // finalise initialisation
-              finaliseInit(
-                uid,
-                () => {
-                  currentSchedule = mergedSchedule;
-                  resolve();
-                },
-                reject
-              );
-            })
-            .catch(reject);
+        });
+        // sort schedules
+        schedules = schedules.sort((a, b) => a.created - b.created);
+        // merge all schedules and save them
+        let mergedSchedule = mergeSchedules(schedules);
+        // filter out files that no longer exist
+        // **such files will be detected later by the spider
+        mergedSchedule.changed = mergedSchedule.changed.filter(v =>
+          fs.existsSync(v.path)
+        );
+        for (let i in mergedSchedule.changed) {
+          let change = mergedSchedule.changed[i];
+          change.bytes.done = change.bytes.failed = 0;
         }
-      );
+        saveSchedule(mergedSchedule)
+          .then(() => {
+            // once saved, delete all other schedules
+            files.forEach(file => fs.unlinkSync(`${UPLOAD_DIR}/${file.name}`));
+            // finalise initialisation
+            finaliseInit(
+              uid,
+              () => {
+                currentSchedule = mergedSchedule;
+                resolve();
+              },
+              reject
+            );
+          })
+          .catch(reject);
+      });
     });
   });
+}
+
+function finaliseInit(uid, resolve, reject) {
+  // get user info for use in uploads
+  User.findById(
+    uid,
+    { "plan.expired": 1, "plan.tier": 1, "plan.blocks": 1 },
+    (err, user) => {
+      if (err) return reject(err);
+      if (!user) return reject(new Error("User not found"));
+      if (!user.plan) {
+        return reject(new Error("User doesn't have a plan"));
+      } else if (user.plan.expired) {
+        return reject(new Error("User's plan has expired"));
+      }
+      // get user's blocks for use in uploads
+      Block.find(
+        { _id: { $in: user.plan.blocks } },
+        { _id: 1, bucket: 1, maxSize: 1, latestSize: 1 },
+        (err, blocks) => {
+          if (err) return reject(err);
+          if (blocks.length == 0) {
+            return reject(new Error("No allowed blocks found"));
+          }
+          // get associated buckets for b2_bucket_id selection
+          Bucket.find(
+            { _id: { $in: blocks.map(bl => bl.bucket) } },
+            { _id: 1, b2_bucket_id: 1 },
+            (err, buckets) => {
+              if (err) return reject(err);
+              if (buckets.length == 0) {
+                return reject(
+                  new Error("No allowed buckets found / bucket mismatch")
+                );
+              }
+              allowedBlocks.length = 0;
+              // ensure correct retrieval of blocks and their buckets
+              for (let i in blocks) {
+                const block = blocks[i];
+                let bucket = buckets.find(
+                  bu => bu._id.toString() == block.bucket
+                );
+                if (!bucket) {
+                  return reject(new Error("Bucket mismatch"));
+                }
+                bucket._id = bucket._id.toString();
+                allowedBlocks.push({
+                  _id: block._id.toString(),
+                  bucket,
+                  maxSize: block.maxSize
+                });
+              }
+              // get user's plan tier info for version control
+              // and archive throttling
+              Tier.findOne(
+                { id: user.plan.tier },
+                { archiveSpeed: 1, fileVersioningAllowed: 1 },
+                (err, tier) => {
+                  if (err) return reject(err);
+                  if (!tier)
+                    return reject(new Error("Failed to load Tier data"));
+                  userTier = tier;
+                  b2.authorize()
+                    .then(() => {
+                      initialised = true;
+                      resolve();
+                    })
+                    .catch(reject);
+                }
+              );
+            }
+          ).lean(true);
+        }
+      );
+    }
+  );
 }
 
 /**
@@ -279,7 +292,7 @@ function verifyPlanNotExpired() {
  * Resolved once the current upload settles
  */
 function processChanges(changes, removed) {
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
     if (!allowProcessing) {
       return reject({
         msg: "Processing has been disabled. Possible plan expiry",
@@ -289,51 +302,35 @@ function processChanges(changes, removed) {
     if (changes.length == 0 && removed.length == 0) {
       return resolve();
     }
-    console.log("upload processing");
-    // build new schedule based on updates
-    let uploadSchedule = {
-      changed: changes,
-      removed: removed,
-      created: new Date().getTime()
-    };
-    for (let i in uploadSchedule.changed) {
-      let change = uploadSchedule.changed[i];
-      try {
-        let changeIsNewer = await checkIfChangeIsNewer(
-          change.path,
-          change.modified
-        );
-        if (!changeIsNewer) {
-          console.log("skipped change", change);
-          uploadSchedule.changed.splice(i, 1);
-          i--;
-          continue;
-        }
-      } catch (err) {
-        // if an error occurs, we assume the change is newer
-        console.error(err);
-      }
-    }
-    function checkIfChangeIsNewer(localPath, modifiedTime) {
-      return new Promise((resolve, reject) => {
-        File.findOne(
-          { localPath: localPath, owner: userId },
-          { "log.lastModifiedTime": 1 },
-          (err, file) => {
-            if (err) return reject(err);
-            if (!file || !file.log.lastModifiedTime) {
-              resolve(true);
-            } else {
-              console.log(modifiedTime, file.log.lastModifiedTime);
-              resolve(modifiedTime > file.log.lastModifiedTime);
-            }
-          }
-        );
-      });
-    }
     // wait for current upload to settle
-    pause().then(() => {
+    //jshint ignore:start
+    pause().then(async () => {
       console.log("upload paused");
+      console.log("upload processing");
+      // build new schedule based on updates
+      let uploadSchedule = {
+        changed: changes,
+        removed: removed,
+        created: new Date().getTime()
+      };
+      for (let i in uploadSchedule.changed) {
+        let change = uploadSchedule.changed[i];
+        try {
+          let changeIsNewer = await checkIfChangeIsNewer(
+            change.path,
+            change.modified
+          );
+          if (!changeIsNewer) {
+            console.log("skipped change", change);
+            uploadSchedule.changed.splice(i, 1);
+            i--;
+            continue;
+          }
+        } catch (err) {
+          // if an error occurs, we assume the change is newer
+          console.error(err);
+        }
+      }
       // will apply uploadSchedule to
       // current schedule, save then resume
       let onMerged = mergedSchedule => {
@@ -347,23 +344,46 @@ function processChanges(changes, removed) {
             resume().catch(reject);
             resolve();
           })
-          .catch(err => {
-            reject(err);
-          });
+          .catch(reject);
       };
       // merge current and upload schedules
       // only if the currentSchedule exists
       // (typically during the first cycle)
       if (currentSchedule) {
         // apply mergedSchedule
-        onMerged(mergeSchedules([uploadSchedule, currentSchedule]));
+        let mergedSchedule = mergeSchedules([uploadSchedule, currentSchedule]);
+        clearOtherSchedules(mergedSchedule)
+          .then(() => onMerged(mergedSchedule))
+          .catch(reject);
       } else {
         // if currentSchedule doesn't exist
         // apply uploadSchedule immediately
         onMerged(uploadSchedule);
       }
     });
+    //jshint ignore:end
   });
+  function checkIfChangeIsNewer(localPath, modifiedTime) {
+    return new Promise((resolve, reject) => {
+      File.findOne(
+        {
+          localPath: localPath,
+          owner: userId,
+          idInDatabase: { $ne: "unset" }
+        },
+        { "log.lastModifiedTime": 1 },
+        (err, file) => {
+          if (err) return reject(err);
+          if (!file || !file.log.lastModifiedTime) {
+            resolve(true);
+          } else {
+            console.log(modifiedTime, file.log.lastModifiedTime);
+            resolve(modifiedTime > file.log.lastModifiedTime);
+          }
+        }
+      );
+    });
+  }
 }
 
 function setUploadHandlers(handlers) {
@@ -389,9 +409,33 @@ function saveSchedule(schedule) {
 
 function saveScheduleSync(schedule) {
   fs.writeFileSync(
-    resolveDir(`data/upload/schedule_${schedule.created}.json`),
+    `${UPLOAD_DIR}/schedule_${schedule.created}.json`,
     JSON.stringify(schedule)
   );
+}
+
+function removeScheduleSync(schedule) {
+  fs.unlinkSync(`${UPLOAD_DIR}/schedule_${schedule.created}.json`);
+}
+
+function clearOtherSchedules(schedule) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!schedule) schedule = {};
+      let goalName = `schedule_${schedule.created}.json`;
+      let files = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true });
+      for (let i in files) {
+        let file = files[i];
+        if (!file.isFile()) continue;
+        if (file.name != goalName) {
+          fs.unlinkSync(`${UPLOAD_DIR}/${file.name}`);
+        }
+      }
+    } catch (err) {
+      return reject(err);
+    }
+    resolve();
+  });
 }
 
 /**
@@ -424,6 +468,11 @@ function resume() {
     if (!allowProcessing) {
       return reject("Processing has been disabled. Possible plan expiry");
     }
+    if (!isDownloadsPaused()) {
+      waiting = true;
+      return reject("Resume blocked. Download-service still busy");
+    }
+    waiting = false;
     if (!currentSchedule || !paused) return resolve();
     paused = false;
     console.log("upload resuming");
@@ -443,12 +492,32 @@ function resume() {
       ) {
         console.log("upload [no tasks]!");
         clearInterval(task);
+        console.log("upload [all completed]!");
         if (uploadHandlers.allUploaded) {
           uploadHandlers.allUploaded(currentSchedule);
         }
-        console.log("upload [all completed]!");
+        removeScheduleSync(currentSchedule);
+        currentSchedule = null;
+        paused = true;
         // verify the user's plan hasn't epired
         // if it has block future processing
+        return verifyPlanNotExpired()
+          .catch(err => console.error(err)) // errors aren't a worry here
+          .then(resolve);
+      }
+      // check if all uploads/removals have failed
+      // NOTE if some removals are left, failed uploads might be retried and vice versa
+      // NOTE on restart, all failed tasks WILL be retried
+      if (
+        (currentSchedule.changed.length > 0 &&
+          !currentSchedule.changed.find(
+            f => f.bytes.failed == 0 || f.pendingRetry
+          )) ||
+        (currentSchedule.removed.length > 0 &&
+          !currentSchedule.removed.find(f => !f.failed))
+      ) {
+        console.log("all uploads failed");
+        clearInterval(task);
         return verifyPlanNotExpired()
           .catch(err => console.error(err)) // errors aren't a worry here
           .then(resolve);
@@ -474,135 +543,98 @@ function resume() {
         setImmediate(() => {
           console.log("upload starting");
           let promises = [];
-          let longestTimeout = 1000;
           // process changed files
           if (currentSchedule.changed.length > 0) {
             let nextChange = currentSchedule.changed[0];
-            console.log("nextFile > " + pathParse(nextChange.path).name);
-            if (isLargeFile(nextChange)) {
-              longestTimeout = 5000;
-              setTimeout(() => {
-                promises.push({
-                  item: nextChange,
-                  promise: uploadLargeFile(nextChange)
-                });
-              }, 5000);
-            } else {
-              longestTimeout = 3000;
-              setTimeout(() => {
-                promises.push({
-                  item: nextChange,
-                  promise: uploadSmallFile(nextChange)
-                });
-              }, 3000);
-            }
+            console.log("nextUpload > " + pathParse(nextChange.path).name);
+            attachHandlersAndExecute({
+              item: nextChange,
+              function: isLargeFile(nextChange)
+                ? uploadLargeFile
+                : uploadSmallFile
+            });
           }
           // process removed files
           if (currentSchedule.removed.length > 0) {
-            let item = currentSchedule.removed[0];
-            setTimeout(() => {
-              let removePromise = removeFile(item);
-              promises.push({
-                item: item,
-                promise: removePromise
-              });
-              removePromise.catch(() => {
-                currentSchedule.removed.push(currentSchedule.removed.shift());
-              });
-              removePromise.then(() => {
-                if (currentSchedule.removed[0] == item) {
+            let nextRemoval = currentSchedule.removed[0];
+            console.log("nextRemoval > " + pathParse(nextRemoval.path).name);
+            attachHandlersAndExecute({
+              item: nextRemoval,
+              function: removeFile
+            });
+          }
+          /**
+           * Attaches handlers for and keeps track of the promises
+           * @param {{item: "FileDat", function: Function<Promise>}} holder
+           */
+          function attachHandlersAndExecute(holder) {
+            let promise = holder.function(holder.item);
+            delete holder.function;
+            promises.push(holder);
+            promise
+              // mark the promise as settled
+              .finally(() => (holder.settled = true))
+              // catch and log errors
+              .catch(err => {
+                //NOTE use this to stop when an error occurs
+                // paused = true;
+                // this ^
+                try {
+                  console.error(err.response.data);
+                } catch (error) {
+                  console.error(err.toString());
+                }
+                if (holder.item.bytes) {
+                  holder.item.bytes.failed =
+                    holder.item.bytes.total - holder.item.bytes.done;
+                  currentSchedule.changed.push(currentSchedule.changed.shift());
+                } else {
+                  holder.item.failed = true;
+                  currentSchedule.removed.push(currentSchedule.removed.shift());
+                }
+              })
+              .then(() => {
+                //remove successfull uploads from the schedule
+                if (holder.item.bytes) {
+                  // done+failed bytes must exactly match total size to be successful
+                  if (
+                    holder.item.bytes.failed == 0 &&
+                    holder.item.bytes.done + holder.item.bytes.failed ==
+                      holder.item.bytes.total
+                  ) {
+                    currentSchedule.changed.shift();
+                    console.log("upload confirmed successful");
+                    // increment throttler after the successful upload
+                    throttler.periodGbs += holder.item.bytes.total / 1073741824;
+                  } else {
+                    console.log("upload incomplete!");
+                  }
+                } else if (!holder.item.failed) {
                   currentSchedule.removed.shift();
                 }
+              })
+              .finally(() => {
+                // look for an unsettled promise
+                // if none found, we know we are done
+                if (!promises.find(pr => !pr.settled)) {
+                  processedUpload = true;
+                  console.log("upload(s) [settled]");
+                }
+                // save currentSchedule after each operation
+                saveSchedule(currentSchedule).catch(err => console.error(err));
               });
-            }, 1000);
           }
-          // attach handlers for the promises
-          // this is done after a delay to ensure
-          // all promises are present
-          setTimeout(() => {
-            promises.forEach(p => {
-              p.promise
-                // mark the promise as settled
-                .finally(() => (p.settled = true))
-                // catch and log errors
-                .catch(err => {
-                  //NOTE use this to stop when an error occurs
-                  // paused = true;
-                  // this ^
-                  try {
-                    console.error(err.response.data);
-                  } catch (error) {
-                    console.log(err.toString());
-                  }
-                  if (p.item.bytes) {
-                    p.item.bytes.failed =
-                      p.item.bytes.total - p.item.bytes.done;
-                  } else {
-                    p.item.failed = true;
-                  }
-                })
-                .then(() => {
-                  //remove successfull uploads from the schedule
-                  if (p.item.bytes) {
-                    // done+failed bytes must exactly match total size to be successful
-                    if (
-                      p.item.bytes.failed == 0 &&
-                      p.item.bytes.done + p.item.bytes.failed ==
-                        p.item.bytes.total
-                    ) {
-                      currentSchedule.changed.splice(
-                        currentSchedule.changed.findIndex(
-                          change => change.path == p.item.path
-                        ),
-                        1
-                      );
-                      console.log("upload confirmed successful");
-                      // increment throttler of the successful upload
-                      throttler.periodGbs += p.item.bytes.total / 1073741824;
-                    } else {
-                      console.log("upload incomplete!");
-                    }
-                  } else if (!p.item.failed) {
-                    currentSchedule.removed.splice(
-                      currentSchedule.removed.findIndex(
-                        removal => removal.path == p.item.path
-                      ),
-                      1
-                    );
-                  }
-                })
-                .finally(() => {
-                  // look for an unsettled promise
-                  // if none found, we know we are done
-                  if (!promises.find(pr => !pr.settled)) {
-                    processedUpload = true;
-                    console.log("upload(s) [settled]");
-                  }
-                  // save currentSchedule after each operation
-                  saveSchedule(currentSchedule).catch(err =>
-                    console.error(err)
-                  );
-                });
-            });
-          }, longestTimeout + 1000);
         });
       }
     }, 3000);
+  }).then(() => {
+    if (isDownloadsWaiting()) {
+      console.log("Download-service was waiting\nresuming downloads");
+      downloadsResume().catch(err => {
+        console.log("resume was blocked!\n", err);
+      });
+    }
   });
-}
-
-function isLargeFile(fileDat) {
-  // 1   gb  = 1073741824
-  // 150 mb  = 157286400
-  // 50  mb  = 52428800
-  return fileDat.bytes.total >= 157286400;
-}
-
-function countPartsForLargeFile(fileDat) {
-  // divide into 50mb parts
-  let partsCount = Math.ceil(fileDat.bytes.total / 52428800);
-  // can have at most 10,000 parts per large upload
-  return partsCount <= 10000 ? partsCount : 10000;
 }
 
 function randomFileName() {
@@ -635,6 +667,7 @@ function filterMergedBlocksOutOfAllowedBlocks() {
 }
 
 function selectUploadBlock(fileDat) {
+  //jshint ignore:start
   return new Promise(async (resolve, reject) => {
     let fileBlock;
     try {
@@ -705,7 +738,7 @@ function selectUploadBlock(fileDat) {
         },
         { _id: 1 },
         (err, blocks) => {
-          if (err) throw err;
+          if (err) return reject(err);
           if (blocks.length == 0) {
             return reject(new Error("File is too big to fit in any block"));
           }
@@ -818,73 +851,64 @@ function selectUploadBlock(fileDat) {
       );
     }
   });
+  //jshint ignore:end
 }
 
 function preUpload(fileDat) {
   return new Promise((resolve, reject) => {
-    selectUploadBlock(fileDat)
-      .then(fileBlock => {
-        console.log(fileBlock);
-        let now = new Date().getTime();
-        // Define file object now to use less
-        // internet after upload complete
-        // to ensure MongoDB integrity
-        let fileDoc = {
-          "upload.started": now,
-          $unset: {
-            "upload.paused": "",
-            "upload.finished": ""
-          },
-          pendingDeletion: false,
-          deleted: false,
-          latestSize: fileDat.bytes.total,
-          "log.lastestSizeCalculationDate": now,
-          "log.lastModifiedTime": fileDat.modified
-        };
-        fileDat.isNew = fileBlock.isNew;
-        fileDat.binned = fileBlock.binned;
-        if (fileBlock.version) {
-          fileDat.version = fileBlock.version;
-        }
-        if (fileBlock.isNew) {
-          fileDoc.idInDatabase = "unset";
-          fileDoc.nameInDatabase = fileBlock.nameInDatabase;
-          fileDoc.block = fileBlock.block;
-          fileDoc.bucket = fileBlock.bucket;
-          fileDoc.download = {};
-          fileDoc.originalSize = fileDat.bytes.total;
-          fileDoc["log.detected"] = now;
-          fileDoc.$push = {
-            "log.sizeHistory": {
-              $each: [
-                {
-                  date: now,
-                  size: fileDat.bytes.total
+    beginSession()
+      .then(session => {
+        selectUploadBlock(fileDat)
+          .then(fileBlock => {
+            console.log(fileBlock);
+            let now = new Date().getTime();
+            // Define file object now to use less
+            // internet after upload complete
+            // to ensure MongoDB integrity
+            let fileDoc = {
+              "upload.started": now,
+              $unset: {
+                "upload.paused": "",
+                "upload.finished": ""
+              },
+              download: {},
+              pendingDeletion: false,
+              deleted: false
+            };
+            fileDat.isNew = fileBlock.isNew;
+            fileDat.binned = fileBlock.binned;
+            if (fileBlock.version) {
+              fileDat.version = fileBlock.version;
+            }
+            if (fileBlock.isNew) {
+              fileDoc.idInDatabase = "unset";
+              fileDoc.nameInDatabase = fileBlock.nameInDatabase;
+              fileDoc.block = fileBlock.block;
+              fileDoc.bucket = fileBlock.bucket._id;
+              fileDoc.originalSize = fileDat.bytes.total;
+              fileDoc["log.detected"] = now;
+            }
+            // Update the file's details, creating
+            // a new one if none is found
+            File.updateOne(
+              { localPath: fileDat.path, owner: userId },
+              fileDoc,
+              { upsert: true, setDefaultsOnInsert: true },
+              (err, _done) => {
+                if (err) {
+                  uploading = false;
+                  return reject(err);
                 }
-              ],
-              $sort: { date: -1 }
-            }
-          };
-        }
-        // Update the file's details, creating
-        // a new one if none is found
-        File.updateOne(
-          { localPath: fileDat.path, owner: userId },
-          fileDoc,
-          { upsert: true },
-          (err, _done) => {
-            if (err) {
-              uploading = false;
-              return reject(err);
-            }
-            resolve(fileBlock);
-          }
-        );
+                resolve([session, fileBlock]);
+              }
+            );
+          })
+          .catch(err => {
+            uploading = false;
+            reject(err);
+          });
       })
-      .catch(err => {
-        uploading = false;
-        reject(err);
-      });
+      .catch(reject);
   });
 }
 
@@ -893,39 +917,58 @@ function uploadSmallFile(fileDat) {
     uploading = true;
     console.log("upload small file beginning");
     preUpload(fileDat)
-      .then(fileBlock => {
+      .then(uploadInfo => {
+        let fileBlock = uploadInfo[1];
         b2.getUploadUrl(fileBlock.bucket.b2_bucket_id)
           .then(({ data }) => {
-            b2.uploadFile({
-              uploadUrl: data.uploadUrl,
-              uploadAuthToken: data.authorizationToken,
-              fileName: fileBlock.nameInDatabase,
-              mime: mime.lookup(fileDat.path),
-              data: fs.readFileSync(fileDat.path),
-              info: {
-                "src-last-modified-millis": new Date(fileDat.modified).getTime()
-              },
-              onUploadProgress: e => onUploadProgress(fileDat, e)
-            })
-              .then(({ data }) => onUploadComplete(fileDat, data, resolve))
-              .catch(err => onUploadFail(fileDat, err, resolve, reject));
+            encryptAndCompress(fs.createReadStream(fileDat.path), userId)
+              .then(fileBuffer => {
+                b2.uploadFile({
+                  uploadUrl: data.uploadUrl,
+                  uploadAuthToken: data.authorizationToken,
+                  fileName: fileBlock.nameInDatabase,
+                  mime: mime.lookup(fileDat.path),
+                  data: fileBuffer,
+                  info: {
+                    "src-last-modified-millis": new Date(
+                      fileDat.modified
+                    ).getTime()
+                  },
+                  onUploadProgress: e => onUploadProgress(fileDat, e)
+                })
+                  .then(({ data }) =>
+                    onUploadComplete(
+                      fileDat,
+                      data,
+                      uploadInfo[0],
+                      resolve,
+                      reject
+                    )
+                  )
+                  .catch(err =>
+                    onUploadFail(fileDat, err, uploadInfo[0], resolve, reject)
+                  );
+              })
+              .catch(err =>
+                onUploadFail(fileDat, err, uploadInfo[0], resolve, reject)
+              );
           })
           .catch(err => {
             fileDat.failedOnUrl = true;
-            onUploadFail(fileDat, err, resolve, reject);
+            onUploadFail(fileDat, err, uploadInfo[0], resolve, reject);
           });
       })
       .catch(reject);
   });
 }
 
-//TODO encrypt & compress data before uploading
 function uploadLargeFile(fileDat) {
   return new Promise((resolve, reject) => {
     uploading = true;
     console.log("upload large file beginning");
     preUpload(fileDat)
-      .then(fileBlock => {
+      .then(uploadInfo => {
+        let fileBlock = uploadInfo[1];
         b2.startLargeFile({
           bucketId: fileBlock.bucket.b2_bucket_id,
           fileName: fileBlock.nameInDatabase || randomFileName(),
@@ -933,7 +976,7 @@ function uploadLargeFile(fileDat) {
         })
           .then(({ data }) => {
             let heldPromises = [];
-            let fileDescriptor = fs.openSync(fileDat.path, "r");
+            let initVect;
             let fileDataSize = fs.statSync(fileDat.path).size;
             // calculate part sizes
             console.log("large file length", fileDataSize);
@@ -942,35 +985,18 @@ function uploadLargeFile(fileDat) {
             let partWidth = Math.ceil(fileDataSize / partsCount);
             console.log("large file partWidth", partWidth);
             var partSha1Array = new Array(partsCount);
-            // check for any progress info
-            if (fileDat.parts) {
-              // start uploading incomplete/failed parts
-              fileDat.parts
-                .filter(p => !p.done)
-                .forEach(part => {
-                  heldPromises.push(
-                    holdPartPromise(part.number, part.start, part.length)
-                  );
-                });
-              // extract SHA1 keys for partSha1Array
-              fileDat.parts
-                .filter(p => p.done)
-                .forEach(part => {
-                  partSha1Array[part.number] = part.contentSha1;
-                });
-            } else {
-              // generate promises for each part
-              // and begin executing them
-              fileDat.parts = new Array(partsCount - 1);
-              for (let i = 0; i < partsCount; i++) {
-                // promise starts after a relative delay
-                // this is to avoid overloaing the b2 database
-                const constI = i;
-                heldPromises.push(
-                  holdPartPromise(constI + 1, constI * partWidth, partWidth)
-                );
-              }
+            // generate promises for each part
+            // and begin executing them
+            fileDat.parts = new Array(partsCount - 1);
+            for (let i = 0; i < partsCount; i++) {
+              // promise starts after a relative delay
+              // this is to avoid overloaing the b2 database
+              const constI = i;
+              heldPromises.push(
+                holdPartPromise(constI + 1, constI * partWidth, partWidth)
+              );
             }
+            //jshint ignore:start
             setImmediate(async () => {
               // sequentially execute each part promise
               let aPartFailed = false;
@@ -978,11 +1004,13 @@ function uploadLargeFile(fileDat) {
                 try {
                   await heldPromises.shift()();
                 } catch (err) {
-                  onUploadFail(fileDat, err, resolve, reject);
+                  onUploadFail(fileDat, err, uploadInfo[0], resolve, reject);
                   aPartFailed = true;
+                  // close the file when any part fails
                   return;
                 }
               }
+              // close the file once uploaded
               // part promises must have set the fileId
               // and fully populated the SHA1 array
               partSha1Array = partSha1Array.filter(v => v != null);
@@ -1010,20 +1038,42 @@ function uploadLargeFile(fileDat) {
                     done: fileDat.bytes.total,
                     failed: 0
                   };
-                  onUploadComplete(fileDat, data, resolve);
+                  onUploadComplete(
+                    fileDat,
+                    data,
+                    uploadInfo[0],
+                    resolve,
+                    reject
+                  );
                 })
                 .catch(err => {
                   // upload might have finished
                   // we need to confirm (after 5 seconds)
+                  console.log("checking upload status..");
                   setTimeout(() => {
                     b2.getFileInfo(data.fileId)
                       .then(({ data }) =>
-                        onUploadComplete(fileDat, data, resolve)
+                        onUploadComplete(
+                          fileDat,
+                          data,
+                          uploadInfo[0],
+                          resolve,
+                          reject
+                        )
                       )
-                      .catch(() => onUploadFail(fileDat, err, resolve, reject));
+                      .catch(() =>
+                        onUploadFail(
+                          fileDat,
+                          err,
+                          uploadInfo[0],
+                          resolve,
+                          reject
+                        )
+                      );
                   }, 5000);
                 });
             });
+            //jshint ignore:end
             /**
              * This function will hold a promise to upload a chunk of a large file.
              * It is executed when the preceeding promise is successful (in order to save memory).
@@ -1043,37 +1093,46 @@ function uploadLargeFile(fileDat) {
                 });
                 saveScheduleSync(currentSchedule);
                 return new Promise((resolve, reject) => {
-                  setImmediate(() => {
-                    let part = Buffer.alloc(
-                      Math.min(fileDataSize - partStart, partLength)
-                    );
-                    fs.readSync(fileDescriptor, part, 0, partLength, partStart);
+                  setTimeout(() => {
                     b2.getUploadPartUrl({
                       fileId: data.fileId
                     })
                       .then(({ data }) => {
-                        console.log(
-                          partNumber,
-                          "got url datLen =",
-                          part.length
-                        );
-                        b2.uploadPart({
-                          partNumber: partNumber,
-                          uploadUrl: data.uploadUrl,
-                          uploadAuthToken: data.authorizationToken,
-                          data: part,
-                          onUploadProgress: e =>
-                            onUploadProgress(fileDat, e, partNumber)
-                        })
-                          .then(({ data }) => {
-                            console.log(partNumber, "part done");
-                            partSha1Array[partNumber] = data.contentSha1;
-                            // mark progress tracker as complete
-                            partProgress.done = true;
-                            partProgress.contentSha1 = data.contentSha1;
-                            fileDat.bytes.done += partProgress.bytes.done;
-                            saveScheduleSync(currentSchedule);
-                            resolve();
+                        console.log(partNumber, "got url");
+                        encryptAndCompress(
+                          fs.createReadStream(fileDat.path, {
+                            start: partStart,
+                            end: partStart + partLength - 1
+                          }),
+                          userId,
+                          partNumber == 1,
+                          partNumber == 1,
+                          initVect
+                        )
+                          .then(fileBuffer => {
+                            if (partNumber == 1) {
+                              initVect = fileBuffer[0];
+                              fileBuffer = fileBuffer[1];
+                            }
+                            b2.uploadPart({
+                              partNumber: partNumber,
+                              uploadUrl: data.uploadUrl,
+                              uploadAuthToken: data.authorizationToken,
+                              data: fileBuffer,
+                              onUploadProgress: e =>
+                                onUploadProgress(fileDat, e, partNumber)
+                            })
+                              .then(({ data }) => {
+                                console.log(partNumber, "part done");
+                                partSha1Array[partNumber] = data.contentSha1;
+                                // mark progress tracker as complete
+                                partProgress.done = true;
+                                partProgress.contentSha1 = data.contentSha1;
+                                fileDat.bytes.done += partProgress.bytes.done;
+                                saveScheduleSync(currentSchedule);
+                                resolve();
+                              })
+                              .catch(reject);
                           })
                           .catch(reject);
                       })
@@ -1082,12 +1141,14 @@ function uploadLargeFile(fileDat) {
                         fileDat.failedOnUrl = true;
                         reject(err);
                       });
-                  });
+                  }, 3000);
                 });
               };
             }
           })
-          .catch(err => onUploadFail(fileDat, err, resolve, reject));
+          .catch(err =>
+            onUploadFail(fileDat, err, uploadInfo[0], resolve, reject)
+          );
       })
       .catch(reject);
   });
@@ -1117,13 +1178,22 @@ function onUploadProgress(fileDat, event, pn) {
   });
 }
 
-function onUploadFail(fileDat, err, resolve, reject) {
+/**
+ * Handles failed uploads
+ * @param {"FileDat"} fileDat
+ * @param {Error} err
+ * @param {mongoose.ClientSession} session
+ * @param {Function} resolve
+ * @param {Function} reject
+ */
+function onUploadFail(fileDat, err, session, resolve, reject) {
+  session.abortTransaction();
   fileDat.bytes.failed = fileDat.bytes.total - fileDat.bytes.done;
   // Retry the upload *once* if BackBlaze failed
   // to provide an upload URL.
   // (All other errors are valid.)
-  fileDat.pendingRetry = true;
   if (fileDat.failedOnUrl && !fileDat.retried) {
+    fileDat.pendingRetry = true;
     //NOTE create a handler for if bucket is busy
     console.log("upload failed (bucket is busy) retrying in 5 seconds");
     // only retry if not paused
@@ -1150,10 +1220,9 @@ function onUploadFail(fileDat, err, resolve, reject) {
   // If the file is new, delete the now un-linked
   // file object from MongoDB
   if (fileDat.isNew) {
-    File.deleteOne({ localPath: fileDat.path, owner: userId }, err => {
-      // nothing is allowed to go wrong here!
-      if (err) throw err;
-    });
+    // errors are ignored because the garbage collector
+    // will clean it up
+    File.deleteOne({ localPath: fileDat.path, owner: userId }, err => {});
   }
   reject(err);
   if (uploadHandlers.failed) {
@@ -1171,35 +1240,59 @@ function onUploadFail(fileDat, err, resolve, reject) {
   uploading = false;
 }
 
-function onUploadComplete(fileDat, data, resolve) {
+/**
+ * Handles successful uploads
+ * @param {"FileDat"} fileDat
+ * @param {"B2 FileInfo"} data
+ * @param {mongoose.ClientSession} session
+ * @param {Function} resolve
+ * @param {Function} reject
+ */
+function onUploadComplete(fileDat, data, session, resolve, reject) {
   let now = new Date().getTime();
   let ipAddress = ip.address("public", "ipv6") || ip.address("public", "ipv4");
   // Update the file doc in MongoDB this
   // verifies the upload completed successfuly
+  console.log("fileDat.size", fileDat.size);
   let fileDoc = {
     idInDatabase: data.fileId,
     nameInDatabase: data.fileName,
     "upload.finished": now,
     binned: false,
-    latestSize: data.contentLength,
+    latestSize: fileDat.size,
     "log.lastestSizeCalculationDate": now,
+    "log.lastModifiedTime": fileDat.modified,
     $push: {
-      versions: {
+      "versions.list": {
         $each: [
           {
             idInDatabase: data.fileId,
             dateInserted: now,
-            originalSize: fileDat.bytes.total
+            originalSize: fileDat.size
           }
         ],
         $sort: { dateInserted: -1 }
+      },
+      "log.sizeHistory.list": {
+        $each: [
+          {
+            date: now,
+            size: fileDat.bytes.total
+          }
+        ],
+        $sort: { date: -1 }
       }
+    },
+    $inc: {
+      "versions.count": 1,
+      "versions.activeCount": 1,
+      "log.sizeHistory.count": 1
     }
   };
   if (!fileDat.isNew) {
     // insert an update log for restored files
     if (fileDat.binned) {
-      fileDoc.$push["log.restoredHistory"] = {
+      fileDoc.$push["log.restoredHistory.list"] = {
         $each: [
           {
             date: now,
@@ -1209,9 +1302,10 @@ function onUploadComplete(fileDat, data, resolve) {
         ],
         $sort: { date: -1 }
       };
+      fileDoc.$inc["log.restoredHistory.count"] = 1;
     }
     // insert an update log for non-new files
-    fileDoc.$push["log.updateHistory"] = {
+    fileDoc.$push["log.updateHistory.list"] = {
       $each: [
         {
           date: now,
@@ -1221,119 +1315,144 @@ function onUploadComplete(fileDat, data, resolve) {
       ],
       $sort: { date: -1 }
     };
+    fileDoc.$inc["log.updateHistory.count"] = 1;
   }
-  File.findOneAndUpdate(
+  let fileInMongoDB;
+  let blockDoc;
+  File.findOne(
     { localPath: fileDat.path, owner: userId },
-    fileDoc,
-    // project the old file to select former latestSize
-    { new: false, projection: { _id: 1, block: 1, binned: 1, latestSize: 1 } },
-    (err, file) => {
-      // nothing is allowed to go wrong here!
-      if (err) throw err;
-      if (!file) throw new Error("file not set before upload!");
-      // asyncronous/syncronous completion based
-      // on fileDat.isNew status
-      let onComplete = () => {
-        fileDat.bytes.done = fileDat.bytes.total;
-        fileDat.bytes.failed = 0;
-        if (uploadHandlers.success) {
-          uploadHandlers.success(fileDat);
-        }
-        uploading = false;
-        resolve();
-      };
-      Block.findById(file.block, { latestSize: 1 }, (err, block) => {
-        // nothing is allowed to go wrong here!
-        if (err) throw err;
-        let blockDoc = {
-          // update file block's latestSize by estimating
-          // NOTE: 'file.latestSize' is based on the file size *before* it was updated
-          //        see the File.findOneAndUpdate(...) options above
+    { _id: 1, block: 1, binned: 1, latestSize: 1 }
+  )
+    .then(file => (fileInMongoDB = file))
+    .then(() =>
+      File.updateOne({ localPath: fileDat.path, owner: userId }, fileDoc, {
+        session
+      })
+    )
+    .then(() => {
+      if (!fileInMongoDB) throw new Error("file not set before upload!");
+      // console.log("file(mongo)", JSON.stringify(fileInMongoDB));
+      blockDoc = {
+        // update file block's latestSize based on the file's size *before*
+        // it was updated. See the File.findOneAndUpdate(...) options above
+        $inc: {
           latestSize:
-            block.latestSize -
-            (fileDat.isNew ? 0 : file.latestSize) +
-            data.contentLength
-        };
-        if (fileDat.isNew) {
-          // update block tracking for new files
-          blockDoc.$inc = {
-            fileCount: 1
-          };
-          blockDoc.$push = {
-            "log.fileAddHistory": {
-              $each: [
-                {
-                  fileId: file._id,
-                  date: now,
-                  ipAddress: ipAddress,
-                  reason: "Newly detected file in file system"
-                }
-              ],
-              $sort: { date: -1 }
-            }
-          };
+            (fileDat.isNew ? 0 : -fileInMongoDB.latestSize) + fileDat.size
         }
-        Block.updateOne({ _id: file.block }, blockDoc, (err, _done) => {
-          // nothing is allowed to go wrong here!
-          if (err) throw err;
-          // complete upload for new&old files
-          onComplete();
-        });
-      });
-    }
-  );
+      };
+      if (fileDat.isNew) {
+        // update block tracking for new files
+        blockDoc.$inc.fileCount = 1;
+        blockDoc.$push = {
+          "log.fileAddHistory.list": {
+            $each: [
+              {
+                fileId: fileInMongoDB._id,
+                date: now,
+                ipAddress: ipAddress,
+                reason: "Newly detected file in file system"
+              }
+            ],
+            $sort: { date: -1 }
+          }
+        };
+        blockDoc.$inc["log.fileAddHistory.count"] = 1;
+      }
+      // console.log(JSON.stringify(blockDoc));
+    })
+    .then(() =>
+      Block.updateOne({ _id: fileInMongoDB.block }, blockDoc, { session })
+    )
+    .then(() =>
+      session
+        .commitTransaction()
+        .then(() => {
+          console.log("marking upload as successful");
+          fileDat.bytes.done = fileDat.bytes.total;
+          fileDat.bytes.failed = 0;
+          if (uploadHandlers.success) {
+            uploadHandlers.success(fileDat);
+          }
+          uploading = false;
+          resolve();
+        })
+        .catch(rejectOperation)
+    )
+    .catch(rejectOperation);
+  function rejectOperation(err) {
+    console.error(err);
+    fileDat.bytes.failed = fileDat.bytes.total;
+    fileDat.bytes.done = 0;
+    fileDat.retried = true;
+    console.log("\nWaiting 5 seconds to delete version from b2\n");
+    setTimeout(() => {
+      b2.deleteFileVersion({
+        fileName: fileDoc.nameInDatabase,
+        fileId: fileDoc.idInDatabase
+      })
+        .catch(err => console.error(err))
+        .finally(() => onUploadFail(fileDat, err, session, resolve, reject));
+    }, 5000);
+  }
 }
 
 function removeFile(fileDat) {
   return new Promise((resolve, reject) => {
-    File.findOne(
-      { localPath: fileDat.path, owner: userId },
-      { bucket: 1, nameInDatabase: 1 },
-      (err, file) => {
-        if (err) return reject(err);
-        if (!file) {
-          return reject(new Error("File not found!"));
-        }
-        Bucket.findById(file.bucket, { b2_bucket_id: 1 }, (err, bucket) => {
-          if (err) return reject(err);
-          if (!bucket) {
-            return reject(new Error("File's bucket not found!"));
-          }
-          b2.hideFile({
-            bucketId: bucket.b2_bucket_id,
-            fileName: file.nameInDatabase
-          })
-            .then(() => {
-              let now = new Date().getTime();
-              let ipAddress =
-                ip.address("public", "ipv6") || ip.address("public", "ipv4");
-              let fileDoc = {
-                binned: true,
-                $push: {
-                  "log.binnedHistory": {
-                    $each: [
-                      {
-                        date: now,
-                        ipAddress: ipAddress,
-                        reason: "File removed from user's file system"
-                      }
-                    ],
-                    $sort: { date: -1 }
-                  }
+    beginSession()
+      .then(session => {
+        File.findOne(
+          { localPath: fileDat.path, owner: userId },
+          { bucket: 1, nameInDatabase: 1 },
+          (err, file) => {
+            if (err) return reject(err);
+            if (!file) {
+              return reject(new Error("File not found!"));
+            }
+            Bucket.findOne(
+              { _id: file.bucket },
+              { b2_bucket_id: 1 },
+              (err, bucket) => {
+                if (err) return reject(err);
+                if (!bucket) {
+                  return reject(new Error("File's bucket not found!"));
                 }
-              };
-              File.findOneAndUpdate(
-                { localPath: fileDat.path, owner: userId },
-                fileDoc,
-                (err, file) => {
-                  if (err) return reject(err);
-                  if (file) {
-                    // update block tracking for new files
+                b2.hideFile({
+                  bucketId: bucket.b2_bucket_id,
+                  fileName: file.nameInDatabase
+                })
+                  .then(() => {
+                    let now = new Date().getTime();
+                    let ipAddress =
+                      ip.address("public", "ipv6") ||
+                      ip.address("public", "ipv4");
+                    let fileDoc = {
+                      binned: true,
+                      $push: {
+                        "log.binnedHistory.list": {
+                          $each: [
+                            {
+                              date: now,
+                              ipAddress: ipAddress,
+                              reason: "File removed from user's file system"
+                            }
+                          ],
+                          $sort: { date: -1 }
+                        }
+                      },
+                      $inc: {
+                        "log.binnedHistory.count": 1
+                      }
+                    };
+                    File.updateOne(
+                      { localPath: fileDat.path, owner: userId },
+                      fileDoc,
+                      { session }
+                    );
                     Block.updateOne(
                       { _id: file.block },
                       {
                         $push: {
-                          "log.fileBinnedHistory": {
+                          "log.fileBinnedHistory.list": {
                             $each: [
                               {
                                 fileId: file._id,
@@ -1344,25 +1463,40 @@ function removeFile(fileDat) {
                             ],
                             $sort: { date: -1 }
                           }
+                        },
+                        $inc: {
+                          "log.fileBinnedHistory.count": 1
                         }
                       },
-                      (err, _done) => {
-                        // nothing is allowed to go wrong here!
-                        if (err) return reject(err);
-                        // complete upload for new files
-                        resolve();
-                      }
+                      { session }
                     );
-                  } else {
-                    return reject(new Error("Couldn't find file to update!"));
-                  }
-                }
-              );
-            })
-            .catch(err => reject(err));
-        });
-      }
-    );
+                    session
+                      .commitTransaction()
+                      .then(resolve)
+                      .catch(reject);
+                  })
+                  .catch(reject);
+              }
+            );
+          }
+        );
+      })
+      .catch(reject);
+  });
+}
+
+/**
+ * @returns {Promise<mongoose.ClientSession>}
+ */
+function beginSession() {
+  return new Promise((resolve, reject) => {
+    mongoose
+      .startSession()
+      .then(session => {
+        session.startTransaction();
+        resolve(session);
+      })
+      .catch(reject);
   });
 }
 
@@ -1371,10 +1505,12 @@ function removeFile(fileDat) {
 // This is to ensure there's only 1 running service
 module.exports = {
   init,
-  initialised: () => initialised,
+  isInitialised: () => initialised,
   pause,
+  isPaused: () => paused,
   resume,
+  isWaiting: () => waiting,
   processChanges,
   setUploadHandlers,
-  currentSchedule: () => currentSchedule
+  getCurrentSchedule: () => currentSchedule
 };

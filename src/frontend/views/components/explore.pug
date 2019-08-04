@@ -1,0 +1,50 @@
+extends layout
+block component
+  #explore.stage(ng-controller="exploreCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content(ng-if="stage.status == '' && G.user.plan")
+      .header.bg-secondary
+        i.material-icons.back(ng-show="source.stack.length > 1", ng-click="source.back()") arrow_back
+        .title.color-muted
+          h1
+            i.material-icons explore
+            | Explorer
+        .path
+          h3 {{source.current.name}}
+      .list
+        .status-box.loading(ng-show="source.status == 'loading'")
+          | !{circleSpinner}
+          h3 Loading files
+        .status-box.error(ng-show="source.status == 'error'")
+          i.material-icons error_outline
+          h3 Something went wrong
+          p
+          | If this error persits, try restarting the app.
+          br
+          | For more help, contact support.
+        .item.folder.w3-animate-opacity(ng-show="source.status == ''", ng-repeat="folder in source.current.folders", ng-click="source.enter(folder.explorePath)", context-menu='folder.contextMenu')
+          .name
+            i.material-icons folder
+            span.text {{folder.name}}
+          span.files {{folder.fileCounted}}
+          .more
+            span.size {{folder.sized}}
+            i.material-icons(context-menu='folder.contextMenu', context-menu-on="click") more_horiz
+        .item.file.w3-animate-opacity(ng-show="source.status == ''", ng-repeat="file in source.current.files", ng-click="source.select(file)", context-menu='file.contextMenu', ng-class="{'bg-accent-light': source.selected.includes(file.localPath)}")
+          .name
+            i.material-icons insert_drive_file
+            span.text {{file.name}}
+          .more
+            span.size {{file.sized}}
+            i.material-icons(context-menu='file.contextMenu', context-menu-on="click") more_horiz
+      .actions
+

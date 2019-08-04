@@ -67,7 +67,7 @@ function startTask() {
     // NOTE: upload processes may still be running!
     if (process) clearInterval(process);
     // check upload-service is initialised
-    if (!uploadService.initialised()) {
+    if (!uploadService.isInitialised()) {
       return reject("upload-service not initialised");
     } else {
       // start spider process
@@ -228,6 +228,7 @@ function task() {
           directory: directory.path,
           path: filePath,
           modified: stat.mtimeMs,
+          size: stat.size,
           bytes: {
             total: stat.size,
             done: 0,

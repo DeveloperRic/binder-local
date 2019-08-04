@@ -49,6 +49,6 @@ var tierSchema = mongoose.Schema({
     type: Boolean,
     default: false
   }
-});
+}, {id: false});
 
 var Tier = (module.exports = mongoose.model("Tier", tierSchema));

@@ -298,22 +298,7 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
             plan.price = tier.pricePerMonth * G.user.plan.lengthInMonths;
             let formatDate = date => {
               return `${date.getDate()} 
-            ${
-              [
-                "January",
-                "February",
-                "March",
-                "April",
-                "May",
-                "June",
-                "July",
-                "August",
-                "September",
-                "October",
-                "November",
-                "December"
-              ][date.getMonth()]
-            } ${date.getFullYear()}`;
+            ${G.longMonths[date.getMonth()]} ${date.getFullYear()}`;
             };
             let periodEnd = new Date(G.user.plan.currentPeriodStart);
             periodEnd.setFullYear(
@@ -391,26 +376,12 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
             });
           });
           console.log(events);
-          let monthArray = [
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec"
-          ];
           for (let i in events) {
             let event = events[i];
             plan.chart.data.datasets[0].data.push(
               Math.round(event.size / storageScale[0])
             );
-            plan.chart.data.labels.push(`${monthArray[event.date.getMonth()]}`);
+            plan.chart.data.labels.push(`${G.shortMonths[event.date.getMonth()]}`);
           }
           let periodEnd = new Date(G.user.plan.currentPeriodStart);
           periodEnd.setFullYear(
@@ -422,11 +393,11 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
           );
           if (events.find(e => e.date.getMonth() == periodEnd.getMonth())) {
             plan.chart.data.labels.push(
-              `${monthArray[periodEnd.getMonth()]} ${periodEnd.getFullYear()}`
+              `${G.shortMonths[periodEnd.getMonth()]} ${periodEnd.getFullYear()}`
             );
           } else {
             plan.chart.data.labels.push(
-              `${monthArray[periodEnd.getMonth()]} (estimated)`
+              `${G.shortMonths[periodEnd.getMonth()]} (estimated)`
             );
           }
           if (plan.chart.data.datasets[0].data.length > 0) {
@@ -470,7 +441,7 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
       email.sent = false;
       $http
         .post(
-          `https://${G.API_DOMAIN}/client/auth/sendEmailVerification`,
+          `${G.API_DOMAIN}/client/auth/sendEmailVerification`,
           { uid: G.profile.sub },
           G.oauthHeader()
         )
@@ -522,7 +493,7 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
       stage.status = "";
     }
     $scope.$apply();
-  });
+  }, "plan.tier", "plan.lengthInMonths", "plan.currentPeriodStart");
 
   function fixPathSlashes(path) {
     return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");

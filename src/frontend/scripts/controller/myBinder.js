@@ -3,7 +3,6 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
   const ip = require("ip");
   const G = $rootScope.G;
   var Block = G.clientModels.Block;
-  var File = G.clientModels.File;
   var Tier = G.clientModels.Tier;
 
   // ---------------------------------------
@@ -45,7 +44,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
           G.loadingPopup.visible = true;
           $http
             .post(
-              `https://${G.API_DOMAIN}/client/plan/mergeBlocks`,
+              `${G.API_DOMAIN}/client/plan/mergeBlocks`,
               {
                 subBlock: subBlockId,
                 mainBlock: mainBlockId,
@@ -105,7 +104,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
         );
     }
     $scope.$apply();
-  });
+  }, "plan", "stripe_customer_id");
 
   function spaceRefresh() {
     return new Promise((resolve, reject) => {
@@ -127,7 +126,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
               fileCount: block.fileCount,
               contextMenu: [
                 {
-                  html: contextMenuHTML("file_download", "Retrieve block"),
+                  html: contextMenuHTML("file_download", "Download block"),
                   click: () => space.retrieveBlock(block._id)
                 },
                 {
@@ -230,22 +229,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
         });
         let formatDate = date => {
           return `${date.getDate()} 
-          ${
-            [
-              "January",
-              "February",
-              "March",
-              "April",
-              "May",
-              "June",
-              "July",
-              "August",
-              "September",
-              "October",
-              "November",
-              "December"
-            ][date.getMonth()]
-          } ${date.getFullYear()}`;
+          ${G.longMonths[date.getMonth()]} ${date.getFullYear()}`;
         };
         let periodEnd = new Date(G.user.plan.currentPeriodStart);
         periodEnd.setFullYear(
@@ -257,7 +241,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
         plan.nextPayment = formatDate(periodEnd);
         $http
           .get(
-            `https://${G.API_DOMAIN}/client/plan/invoiceHistory`,
+            `${G.API_DOMAIN}/client/plan/invoiceHistory`,
             G.oauthHeader({
               params: {
                 subscription: G.user.plan.stripe_subscription_id,
@@ -284,7 +268,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
             });
             $http
               .get(
-                `https://${G.API_DOMAIN}/client/plan/cardForInvoice`,
+                `${G.API_DOMAIN}/client/plan/cardForInvoice`,
                 G.oauthHeader({
                   params: {
                     invoices: invoices,

@@ -6,13 +6,18 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
   var Block = G.clientModels.Block;
 
   // TODO allow users to force upload now
-  // TODO build a file explorer
-  // TODO show folders that exist in the cloud but not locally
 
   // ---------------------------------------
 
   var stage = ($scope.stage = {
-    status: "waiting"
+    status: "waiting",
+    checkArgs: () => {
+      if (G.stageStack.switchArgs.folders) {
+        if (G.stageStack.switchArgs.folders.includes("browse")) {
+          broswer.open();
+        }
+      }
+    }
   });
 
   var updates = ($scope.updates = {
@@ -56,6 +61,108 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
     }
   });
 
+  let directoryListResponse = {
+    allow: false
+  };
+  G.ipcRenderer.on("spider-directoryStore-err", (event, arg) => {
+    if (!directoryListResponse.allow) return;
+    directoryListResponse.allow = false;
+    if (arg) directoryListResponse.reject(["An error occured", arg]);
+    else directoryListResponse.reject(["Unknown error occured"]);
+  });
+  G.ipcRenderer.on("spider-directoryStore-res", (event, directoryStore) => {
+    if (!directoryListResponse.allow) return;
+    directoryListResponse.allow = false;
+    if (!directoryStore) {
+      return directoryListResponse.reject([
+        "DirStore didn't return anything",
+        directoryStore
+      ]);
+    }
+    console.log(directoryStore);
+    const directories = [];
+    directoryStore.active.forEach(directory => {
+      directories.push({
+        path: directory.path,
+        name: smallerPath(normalisePath(directory.path), 25),
+        ignored: directory.files
+          .filter(f => f.ignore)
+          .map(f => {
+            let filePath = pathParse(f.path);
+            return {
+              path: f.path,
+              name: filePath.name + filePath.ext
+            };
+          })
+      });
+    });
+    directoryStore.ignore.forEach(directory => {
+      let existingDir = directories.find(d => d.path == directory.path);
+      if (existingDir) {
+        existingDir.ignored.splice(0, 0, {
+          path: directory.path,
+          name: pathParse(directory.path).name
+        });
+      }
+    });
+    let parents = new Map();
+    for (let i in directories) {
+      let directory = directories[i];
+      let topParent = "";
+      for (let j in directories) {
+        let dir = directories[j];
+        if (dir.path == directory.path) continue;
+        if (directory.path.startsWith(dir.path)) {
+          if (!topParent || dir.path.length < topParent.length) {
+            topParent = dir.path;
+          }
+        }
+      }
+      let isOwnParent = topParent == "";
+      if (isOwnParent) topParent = directory.path;
+      if (parents.has(topParent)) {
+        if (!isOwnParent) {
+          parents.get(topParent).push(directory.path);
+        }
+      } else {
+        if (isOwnParent) {
+          parents.set(topParent, []);
+        } else {
+          parents.set(topParent, [directory.path]);
+        }
+      }
+    }
+    let groupedDirs = [];
+    let parentsIterator = parents.entries();
+    let group;
+    while ((group = parentsIterator.next().value)) {
+      const parentPath = group[0];
+      const parent = directories.find(dir => dir.path == parentPath);
+      if (!parent) throw new Error("Bad grouping algorithm");
+      parent.subFolders = [];
+      group[1].forEach(childPath => {
+        let child = directories.find(dir => dir.path == childPath);
+        if (!child) throw new Error("Bad grouping algorithm");
+        parent.subFolders.push(child);
+      });
+      groupedDirs.push(parent);
+    }
+    folders.list = groupedDirs;
+    console.log(folders.list);
+    folders.status = "";
+    updates.setUpdating(false);
+    directoryListResponse.resolve();
+    folders.loadTask = $interval(
+      () => {
+        if (folders.autoLoadCount++ < 5) {
+          folders.load();
+        }
+      },
+      60000,
+      1
+    );
+  });
+
   var folders = ($scope.folders = {
     status: "waiting",
     list: [],
@@ -69,108 +176,21 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
         $interval.cancel(folders.loadTask);
         updates.setUpdating(true);
         folders.status = "loading";
+        directoryListResponse = {
+          allow: true,
+          resolve,
+          reject
+        };
         $scope.$$postDigest(() => {
-          let allowResponses = true;
-          G.ipcRenderer.once("spider-directoryStore-err", (event, arg) => {
-            if (!allowResponses) return;
-            allowResponses = false;
-            if (arg) reject(["An error occured", arg]);
-            else reject(["Unknown error occured"]);
-          });
-          G.ipcRenderer.once("spider-directoryStore-res", (event, directoryStore) => {
-            if (!allowResponses) return;
-            allowResponses = false;
-            if (!directoryStore) {
-              return reject(["DirStore didn't return anything", directoryStore]);
-            }
-            console.log(directoryStore);
-            const directories = [];
-            directoryStore.active.forEach(directory => {
-              directories.push({
-                path: directory.path,
-                name: smallerPath(fixPathSlashes(directory.path), 20),
-                ignored: directory.files
-                  .filter(f => f.ignore)
-                  .map(f => {
-                    let filePath = pathParse(f.path);
-                    return {
-                      path: f.path,
-                      name: filePath.name + filePath.ext
-                    };
-                  })
-              });
-            });
-            directoryStore.ignore.forEach(directory => {
-              let existingDir = directories.find(d => d.path == directory.path);
-              if (existingDir) {
-                existingDir.ignored.splice(0, 0, {
-                  path: directory.path,
-                  name: pathParse(directory.path).name
-                });
-              }
-            });
-            let parents = new Map();
-            for (let i in directories) {
-              let directory = directories[i];
-              let topParent = "";
-              for (let j in directories) {
-                let dir = directories[j];
-                if (dir.path == directory.path) continue;
-                if (directory.path.startsWith(dir.path)) {
-                  if (!topParent || dir.path.length < topParent.length) {
-                    topParent = dir.path;
-                  }
-                }
-              }
-              let isOwnParent = topParent == "";
-              if (isOwnParent) topParent = directory.path;
-              if (parents.has(topParent)) {
-                if (!isOwnParent) {
-                  parents.get(topParent).push(directory.path);
-                }
-              } else {
-                if (isOwnParent) {
-                  parents.set(topParent, []);
-                } else {
-                  parents.set(topParent, [directory.path]);
-                }
-              }
-            }
-            let groupedDirs = [];
-            let parentsIterator = parents.entries();
-            let group;
-            while ((group = parentsIterator.next().value)) {
-              const parentPath = group[0];
-              const parent = directories.find(dir => dir.path == parentPath);
-              if (!parent) throw new Error("Bad grouping algorithm");
-              parent.subFolders = [];
-              group[1].forEach(childPath => {
-                let child = directories.find(dir => dir.path == childPath);
-                if (!child) throw new Error("Bad grouping algorithm");
-                parent.subFolders.push(child);
-              });
-              groupedDirs.push(parent);
-            }
-            folders.list = groupedDirs;
-            console.log(folders.list);
-            folders.status = "";
-            updates.setUpdating(false);
-            resolve();
-            folders.loadTask = $interval(
-              () => {
-                if (folders.autoLoadCount++ < 5) {
-                  folders.load();
-                }
-              },
-              60000,
-              1
-            );
-          });
-          $interval(() => {
-            if (!allowResponses) return;
-            (allowResponses = false);
-            reject(["DirStore took too long to respond"]);
-          }, 10000, 1);
+          $interval(
+            () => {
+              if (!directoryListResponse.allow) return;
+              directoryListResponse.allow = false;
+              reject(["DirStore took too long to respond"]);
+            },
+            10000,
+            1
+          );
           G.ipcRenderer.send("spider-directoryStore");
         });
       });
@@ -259,20 +279,7 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
           items.sort((a, b) => b.timestamp - a.timestamp);
           items.forEach(item => {
             item.formattedDate = `${
-              [
-                "Jan",
-                "Feb",
-                "Mar",
-                "Apr",
-                "May",
-                "Jun",
-                "Jul",
-                "Aug",
-                "Sep",
-                "Oct",
-                "Nov",
-                "Dec"
-              ][item.timestamp.getMonth()]
+              G.shortMonths[item.timestamp.getMonth()]
             } ${item.timestamp.getDate()}`;
           });
           history.list = items;
@@ -293,9 +300,9 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
           { owner: G.user._id },
           {
             "log.detected": 1,
-            "log.updateHistory": { $slice: 6 },
-            "log.binnedHistory": { $slice: 6 },
-            "log.restoredHistory": { $slice: 6 },
+            "log.updateHistory.list": { $slice: 6 },
+            "log.binnedHistory.list": { $slice: 6 },
+            "log.restoredHistory.list": { $slice: 6 },
             "log.latestSizeCalculationDate": 1
           },
           (err, files) => {
@@ -306,9 +313,10 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
                 action: "File detected in file system",
                 timestamp: new Date(file.log.detected)
               });
-              processLogs(file.log.updateHistory, "File updated");
-              processLogs(file.log.binnedHistory, "File binned");
-              processLogs(file.log.restoredHistory, "File restored");
+              console.log(JSON.parse(JSON.stringify(file)));
+              processLogs(file.log.updateHistory.list, "File updated");
+              processLogs(file.log.binnedHistory.list, "File binned");
+              processLogs(file.log.restoredHistory.list, "File restored");
               if (file.log.latestSizeCalculationDate) {
                 items.push({
                   action: "File size re-calculated",
@@ -358,6 +366,12 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
     }
   });
 
+  var broswer = ($scope.broswer = {
+    open: () => {
+      G.notifyError("File broswer not yet implemented");
+    }
+  });
+
   // ---------------------------------------
 
   stage.status = "loading";
@@ -374,19 +388,24 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
       return $scope.$apply();
     }
     Promise.all([folders.load(), history.load()])
-      .then(() => $scope.$apply(() => (stage.status = "")))
-      .catch(args =>
+      .then(() => {
+        $scope.$apply(() => {
+          stage.status = "";
+          stage.checkArgs();
+        });
+      })
+      .catch(args => {
         $scope.$apply(() => {
           stage.status = "error";
           if (args) {
             G.notifyError(args[0], args[1]);
           }
-        })
-      );
+        });
+      });
     $scope.$apply();
   });
 
-  function fixPathSlashes(path) {
+  function normalisePath(path) {
     return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");
   }
 
