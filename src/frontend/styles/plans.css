@@ -91,6 +91,11 @@
   overflow: hidden;
 }
 
+#checkout button.checkout i {
+  margin-left: 10px;
+  font-size: 14px !important;
+}
+
 #checkout .blocks {
   display: flex;
   align-items: center;
@@ -144,6 +149,10 @@
   margin-right: 10px;
 }
 
+#checkout .block.warn {
+  background-color: #ef6c00;
+}
+
 #checkout .side {
   display: inline-flex;
   flex-direction: column;
@@ -152,6 +161,10 @@
 #checkout .side .block + .block {
   margin-top: 15px;
   margin-left: 0;
+}
+
+#checkout .paying-cursor * {
+  cursor: not-allowed !important;
 }
 
 #checkout .paying {

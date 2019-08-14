@@ -4,11 +4,16 @@ const ip = require("ip");
 const mime = require("mime-types");
 const pathParse = require("path-parse");
 const mongoose = require("mongoose");
+const checkDiskSpace = require("check-disk-space");
 
-const { isLargeFile, countPartsForLargeFile } = require("./coordination.js");
+const {
+  isLargeFile,
+  countPartsForLargeFile,
+  clearDir
+} = require("./coordination.js");
 const { getB2Key } = require("../security/keyManagement");
 const { encryptAndCompress } = require("../security/storeSecure");
-const { resolveDir } = require("../prodVariables");
+const { PROD_DEV_MODE, resolveDir } = require("../prodVariables");
 
 const b2 = new (require("backblaze-b2"))(getB2Key());
 
@@ -18,7 +23,8 @@ const Bucket = require("../model/bucket");
 const Block = require("../model/block");
 const File = require("../model/file");
 
-const UPLOAD_DIR = resolveDir("data/upload");
+const UPLOAD_DIR = resolveDir("data/upload/schedules");
+const HOLD_DIR = resolveDir("data/upload/incomplete");
 
 let currentSchedule;
 let paused = true;
@@ -66,7 +72,7 @@ function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
     // get saved schedules
     fs.mkdir(UPLOAD_DIR, { recursive: true }, err => {
       if (err) return reject(err);
-      fs.readdir(UPLOAD_DIR, { withFileTypes: true }, (err, files) => {
+      fs.readdir(UPLOAD_DIR, { withFileTypes: true }, async (err, files) => {
         if (err) return reject(err);
         files = files.filter(file => file.isFile());
         // finalise if no schedules found
@@ -104,27 +110,36 @@ function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
         let mergedSchedule = mergeSchedules(schedules);
         // filter out files that no longer exist
         // **such files will be detected later by the spider
-        mergedSchedule.changed = mergedSchedule.changed.filter(v =>
-          fs.existsSync(v.path)
-        );
+        try {
+          await removeOutdatedChanges(mergedSchedule.changed);
+        } catch (err) {
+          return reject(err);
+        }
+        let onSaved = callback => {
+          // once saved, delete all other schedules
+          files.forEach(file => fs.unlinkSync(`${UPLOAD_DIR}/${file.name}`));
+          // finalise initialisation
+          finaliseInit(
+            uid,
+            () => {
+              if (callback) callback();
+              resolve();
+            },
+            reject
+          );
+        };
+        if (
+          mergedSchedule.changed.length == 0 &&
+          mergedSchedule.removed.length == 0
+        ) {
+          return onSaved();
+        }
         for (let i in mergedSchedule.changed) {
           let change = mergedSchedule.changed[i];
           change.bytes.done = change.bytes.failed = 0;
         }
         saveSchedule(mergedSchedule)
-          .then(() => {
-            // once saved, delete all other schedules
-            files.forEach(file => fs.unlinkSync(`${UPLOAD_DIR}/${file.name}`));
-            // finalise initialisation
-            finaliseInit(
-              uid,
-              () => {
-                currentSchedule = mergedSchedule;
-                resolve();
-              },
-              reject
-            );
-          })
+          .then(() => onSaved(() => (currentSchedule = mergedSchedule)))
           .catch(reject);
       });
     });
@@ -191,12 +206,16 @@ function finaliseInit(uid, resolve, reject) {
                   if (!tier)
                     return reject(new Error("Failed to load Tier data"));
                   userTier = tier;
-                  b2.authorize()
+                  clearDir(HOLD_DIR)
+                    .catch(err => console.error(err))
                     .then(() => {
-                      initialised = true;
-                      resolve();
-                    })
-                    .catch(reject);
+                      b2.authorize()
+                        .then(() => {
+                          initialised = true;
+                          resolve();
+                        })
+                        .catch(reject);
+                    });
                 }
               );
             }
@@ -254,7 +273,7 @@ function createBlankSchedule() {
   return {
     changed: [],
     removed: [],
-    created: new Date().getTime()
+    created: Date.now()
   };
 }
 
@@ -303,87 +322,117 @@ function processChanges(changes, removed) {
       return resolve();
     }
     // wait for current upload to settle
-    //jshint ignore:start
-    pause().then(async () => {
-      console.log("upload paused");
-      console.log("upload processing");
-      // build new schedule based on updates
-      let uploadSchedule = {
-        changed: changes,
-        removed: removed,
-        created: new Date().getTime()
-      };
-      for (let i in uploadSchedule.changed) {
-        let change = uploadSchedule.changed[i];
+    pause()
+      .then(async () => {
+        if (PROD_DEV_MODE) {
+          console.log("upload processing");
+        }
+        // build new schedule based on updates
+        let uploadSchedule = {
+          changed: changes,
+          removed: removed,
+          created: Date.now()
+        };
+        let oldSize = uploadSchedule.changed.length;
         try {
-          let changeIsNewer = await checkIfChangeIsNewer(
-            change.path,
-            change.modified
-          );
-          if (!changeIsNewer) {
-            console.log("skipped change", change);
-            uploadSchedule.changed.splice(i, 1);
-            i--;
-            continue;
-          }
+          await removeOutdatedChanges(uploadSchedule.changed);
         } catch (err) {
-          // if an error occurs, we assume the change is newer
-          console.error(err);
+          // if an error occurs, we must report the operation as failed
+          return reject(err);
         }
-      }
-      // will apply uploadSchedule to
-      // current schedule, save then resume
-      let onMerged = mergedSchedule => {
-        currentSchedule = mergedSchedule;
-        // sort changes ensuring smaller files are uploaded first
-        currentSchedule.changed = currentSchedule.changed.sort(
-          (a, b) => a.bytes.total - b.bytes.total
-        );
-        saveSchedule(mergedSchedule)
-          .then(() => {
-            resume().catch(reject);
-            resolve();
-          })
-          .catch(reject);
-      };
-      // merge current and upload schedules
-      // only if the currentSchedule exists
-      // (typically during the first cycle)
-      if (currentSchedule) {
-        // apply mergedSchedule
-        let mergedSchedule = mergeSchedules([uploadSchedule, currentSchedule]);
-        clearOtherSchedules(mergedSchedule)
-          .then(() => onMerged(mergedSchedule))
-          .catch(reject);
-      } else {
-        // if currentSchedule doesn't exist
-        // apply uploadSchedule immediately
-        onMerged(uploadSchedule);
-      }
-    });
-    //jshint ignore:end
+        if (
+          PROD_DEV_MODE &&
+          oldSize > 0 &&
+          oldSize != uploadSchedule.changed.length
+        ) {
+          console.log(
+            `skipped ${Math.abs(
+              oldSize - uploadSchedule.changed.length
+            )} file(s)`
+          );
+        }
+        if (changes.length == 0 && removed.length == 0) {
+          return resolve();
+        }
+        // will apply uploadSchedule to
+        // current schedule, save then resume
+        let onMerged = mergedSchedule => {
+          currentSchedule = mergedSchedule;
+          // sort changes ensuring smaller files are uploaded first
+          currentSchedule.changed = currentSchedule.changed.sort(
+            (a, b) => a.bytes.total - b.bytes.total
+          );
+          saveSchedule(mergedSchedule)
+            .then(() => {
+              if (
+                uploadSchedule.changed.length > 0 ||
+                uploadSchedule.removed.length > 0
+              ) {
+                resume().catch(reject);
+              }
+              resolve();
+            })
+            .catch(reject);
+        };
+        // merge current and upload schedules
+        // only if the currentSchedule exists
+        // (typically during the first cycle)
+        if (currentSchedule) {
+          // apply mergedSchedule
+          let mergedSchedule = mergeSchedules([
+            uploadSchedule,
+            currentSchedule
+          ]);
+          clearOtherSchedules(mergedSchedule)
+            .then(() => onMerged(mergedSchedule))
+            .catch(reject);
+        } else {
+          // if currentSchedule doesn't exist
+          // apply uploadSchedule immediately
+          onMerged(uploadSchedule);
+        }
+      })
+      .catch(reject);
   });
-  function checkIfChangeIsNewer(localPath, modifiedTime) {
-    return new Promise((resolve, reject) => {
-      File.findOne(
-        {
-          localPath: localPath,
-          owner: userId,
-          idInDatabase: { $ne: "unset" }
-        },
-        { "log.lastModifiedTime": 1 },
-        (err, file) => {
-          if (err) return reject(err);
-          if (!file || !file.log.lastModifiedTime) {
-            resolve(true);
-          } else {
-            console.log(modifiedTime, file.log.lastModifiedTime);
-            resolve(modifiedTime > file.log.lastModifiedTime);
-          }
-        }
-      );
-    });
+}
+
+/**
+ * Checks all files with MongoDB and splices the outdated changes
+ * @param {["FileDat"]} changes
+ */
+async function removeOutdatedChanges(changes) {
+  for (let i = 0; i < changes.length; i++) {
+    let c = changes[i];
+    let newer = await changeIsNewer(c.path, c.modified);
+    if (!fs.existsSync(c.path) || !newer) {
+      changes.splice(i, 1);
+      i--;
+    }
   }
+}
+
+function changeIsNewer(localPath, modifiedTime) {
+  return new Promise((resolve, reject) => {
+    File.findOne(
+      {
+        localPath: localPath,
+        owner: userId,
+        $and: [
+          { idInDatabase: { $ne: "unset" } },
+          { idInDatabase: { $ne: "deleted" } }
+        ]
+      },
+      { "log.lastModifiedTime": 1 },
+      (err, file) => {
+        if (err) return reject(err);
+        if (!file || !file.log.lastModifiedTime) {
+          resolve(true);
+        } else {
+          resolve(modifiedTime > file.log.lastModifiedTime);
+        }
+      }
+    );
+  });
 }
 
 function setUploadHandlers(handlers) {
@@ -526,7 +575,7 @@ function resume() {
       if (!uploading && processedUpload) {
         // check if throttling is necessary
         // 'now' is measured in seconds
-        let now = Math.floor(new Date().getTime() / 1000);
+        let now = Math.floor(Date.now() / 1000);
         if (throttler.periodStart < 0 || throttler.periodStart + 3600 < now) {
           // reset throttler if the period is over
           throttler.periodStart = now;
@@ -547,12 +596,15 @@ function resume() {
           if (currentSchedule.changed.length > 0) {
             let nextChange = currentSchedule.changed[0];
             console.log("nextUpload > " + pathParse(nextChange.path).name);
-            attachHandlersAndExecute({
-              item: nextChange,
-              function: isLargeFile(nextChange)
-                ? uploadLargeFile
-                : uploadSmallFile
-            });
+            attachHandlersAndExecute(
+              {
+                item: nextChange,
+                function: isLargeFile(nextChange)
+                  ? uploadLargeFile
+                  : uploadSmallFile
+              },
+              true
+            );
           }
           // process removed files
           if (currentSchedule.removed.length > 0) {
@@ -567,7 +619,11 @@ function resume() {
            * Attaches handlers for and keeps track of the promises
            * @param {{item: "FileDat", function: Function<Promise>}} holder
            */
-          function attachHandlersAndExecute(holder) {
+          function attachHandlersAndExecute(holder, allowResetBytes) {
+            if (allowResetBytes && holder.item.bytes) {
+              holder.item.bytes.done = 0;
+              holder.item.bytes.failed = 0;
+            }
             let promise = holder.function(holder.item);
             delete holder.function;
             promises.push(holder);
@@ -596,14 +652,18 @@ function resume() {
               .then(() => {
                 //remove successfull uploads from the schedule
                 if (holder.item.bytes) {
-                  // done+failed bytes must exactly match total size to be successful
-                  if (
-                    holder.item.bytes.failed == 0 &&
-                    holder.item.bytes.done + holder.item.bytes.failed ==
-                      holder.item.bytes.total
-                  ) {
-                    currentSchedule.changed.shift();
+                  // [not anymore] done+failed bytes must exactly match total size to be successful
+                  //         holder.item.bytes.failed == 0 &&
+                  //           holder.item.bytes.done + holder.item.bytes.failed ==
+                  //             holder.item.bytes.total
+                  if (holder.item.bytes.done == holder.item.bytes.total) {
                     console.log("upload confirmed successful");
+                    currentSchedule.changed.splice(
+                      currentSchedule.changed.findIndex(
+                        f => f.path == holder.item.path
+                      ),
+                      1
+                    );
                     // increment throttler after the successful upload
                     throttler.periodGbs += holder.item.bytes.total / 1073741824;
                   } else {
@@ -627,9 +687,25 @@ function resume() {
         });
       }
     }, 3000);
-  }).then(() => {
+  }).then(async () => {
+    if (currentSchedule) {
+      try {
+        await removeOutdatedChanges(currentSchedule.changed);
+        if (
+          currentSchedule.changed.length > 0 ||
+          currentSchedule.removed.length > 0
+        ) {
+          saveScheduleSync(currentSchedule);
+        } else {
+          removeScheduleSync(currentSchedule);
+          currentSchedule = null;
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
     if (isDownloadsWaiting()) {
-      console.log("Download-service was waiting\nresuming downloads");
+      console.log("Download-service was waiting");
       downloadsResume().catch(err => {
         console.log("resume was blocked!\n", err);
       });
@@ -642,7 +718,7 @@ function randomFileName() {
   if (userTier.fileVersioningAllowed) {
     name = "versioned/";
   }
-  name += `${userId}/${crypto.randomBytes(48).toString("hex")}`;
+  name += `${userId}/${crypto.randomBytes(32).toString("hex")}`;
   return name;
 }
 
@@ -679,7 +755,7 @@ function selectUploadBlock(fileDat) {
             nameInDatabase: 1,
             block: 1,
             binned: 1,
-            versions: 1,
+            "versions.count": 1,
             latestSize: 1
           },
           (err, file) => {
@@ -693,7 +769,7 @@ function selectUploadBlock(fileDat) {
                     bl => bl._id == file.block.toString()
                   ).bucket,
                   binned: file.binned,
-                  version: file.versions.length + 1,
+                  version: file.versions.count + 1,
                   fileLatestSize: file.latestSize,
                   mergedInto
                 });
@@ -861,7 +937,7 @@ function preUpload(fileDat) {
         selectUploadBlock(fileDat)
           .then(fileBlock => {
             console.log(fileBlock);
-            let now = new Date().getTime();
+            let now = Date.now();
             // Define file object now to use less
             // internet after upload complete
             // to ensure MongoDB integrity
@@ -923,6 +999,8 @@ function uploadSmallFile(fileDat) {
           .then(({ data }) => {
             encryptAndCompress(fs.createReadStream(fileDat.path), userId)
               .then(fileBuffer => {
+                let initVect = fileBuffer[0];
+                fileBuffer = fileBuffer[1];
                 b2.uploadFile({
                   uploadUrl: data.uploadUrl,
                   uploadAuthToken: data.authorizationToken,
@@ -940,6 +1018,7 @@ function uploadSmallFile(fileDat) {
                     onUploadComplete(
                       fileDat,
                       data,
+                      initVect,
                       uploadInfo[0],
                       resolve,
                       reject
@@ -974,13 +1053,47 @@ function uploadLargeFile(fileDat) {
           fileName: fileBlock.nameInDatabase || randomFileName(),
           contentType: mime.lookup(fileDat.path)
         })
-          .then(({ data }) => {
-            let heldPromises = [];
+          .then(async ({ data }) => {
+            //define fail handler
+            let onFail = err => {
+              onUploadFail(fileDat, err, uploadInfo[0], resolve, reject);
+            };
+            try {
+              let diskSpace = await checkDiskSpace(
+                pathParse(fileDat.path).root
+              );
+              if (diskSpace.free < fs.statSync(fileDat.path).size * 1.1) {
+                return onFail(
+                  new Error(
+                    "large file cannot be uploaded due to insufficient space"
+                  )
+                );
+              }
+            } catch (err) {
+              return onFail(err);
+            }
+            // encrypt and hold the file in a private location
+            // this is so we can accurately decrypt the file later
+            let heldFilePath;
+            let fileDescriptor;
             let initVect;
-            let fileDataSize = fs.statSync(fileDat.path).size;
+            try {
+              console.log("holding large file..");
+              let encryptInfo = await holdEncryptedFile(fileDat);
+              initVect = encryptInfo[0];
+              heldFilePath = encryptInfo[1];
+              // open held file for upload
+              fileDescriptor = fs.openSync(heldFilePath, "r");
+            } catch (err) {
+              return onFail(err);
+            }
+            // calculate the dimentions of each part relative
+            // to the encrypted file size
+            let heldPromises = [];
+            let fileDataSize = fs.statSync(heldFilePath).size;
             // calculate part sizes
             console.log("large file length", fileDataSize);
-            let partsCount = countPartsForLargeFile(fileDat);
+            let partsCount = countPartsForLargeFile({ size: fileDataSize });
             console.log("large file partsCount", partsCount);
             let partWidth = Math.ceil(fileDataSize / partsCount);
             console.log("large file partWidth", partWidth);
@@ -991,89 +1104,92 @@ function uploadLargeFile(fileDat) {
             for (let i = 0; i < partsCount; i++) {
               // promise starts after a relative delay
               // this is to avoid overloaing the b2 database
-              const constI = i;
+              let partStart = i * partWidth;
               heldPromises.push(
-                holdPartPromise(constI + 1, constI * partWidth, partWidth)
+                holdPartPromise(
+                  i + 1,
+                  partStart,
+                  Math.min(partWidth, fileDataSize - partStart)
+                )
               );
             }
-            //jshint ignore:start
-            setImmediate(async () => {
-              // sequentially execute each part promise
-              let aPartFailed = false;
-              while (heldPromises.length > 0 && !aPartFailed) {
+            // sequentially execute each part promise
+            let aPartFailed = false;
+            while (heldPromises.length > 0 && !aPartFailed) {
+              try {
+                await heldPromises.shift()(fileDescriptor);
+              } catch (err) {
+                onFail(err);
+                aPartFailed = true;
+                // close the file when any part fails
                 try {
-                  await heldPromises.shift()();
-                } catch (err) {
-                  onUploadFail(fileDat, err, uploadInfo[0], resolve, reject);
-                  aPartFailed = true;
-                  // close the file when any part fails
-                  return;
-                }
+                  fs.closeSync(fileDescriptor);
+                  // cleanup held file
+                  fs.unlinkSync(heldFilePath);
+                } catch (err2) {}
+                return;
               }
-              // close the file once uploaded
-              // part promises must have set the fileId
-              // and fully populated the SHA1 array
-              partSha1Array = partSha1Array.filter(v => v != null);
-              if (!data.fileId || partSha1Array.length != partsCount) {
-                return onUploadFail(
+            }
+            // close the file once uploaded
+            try {
+              fs.closeSync(fileDescriptor);
+              fs.unlinkSync(heldFilePath);
+            } catch (err) {}
+            // part promises must have set the fileId
+            // and fully populated the SHA1 array
+            partSha1Array = partSha1Array.filter(v => v != null);
+            if (!data.fileId || partSha1Array.length != partsCount) {
+              return onUploadFail(
+                fileDat,
+                new Error(
+                  "fileId / SHA1 array not fully populated by part promises"
+                ),
+                resolve,
+                reject
+              );
+            }
+            console.log("SHA1 key length", partSha1Array.length);
+            b2.finishLargeFile({
+              fileId: data.fileId,
+              partSha1Array: partSha1Array
+            })
+              .then(({ data }) => {
+                console.log("upload large file completed");
+                // large files track progress differently
+                // so we have to manually set it to done
+                fileDat.bytes = {
+                  total: fileDat.bytes.total,
+                  done: fileDat.bytes.total,
+                  failed: 0
+                };
+                onUploadComplete(
                   fileDat,
-                  new Error(
-                    "fileId / SHA1 array not fully populated by part promises"
-                  ),
+                  data,
+                  initVect,
+                  uploadInfo[0],
                   resolve,
                   reject
                 );
-              }
-              console.log(partSha1Array.length, partSha1Array);
-              b2.finishLargeFile({
-                fileId: data.fileId,
-                partSha1Array: partSha1Array
               })
-                .then(({ data }) => {
-                  console.log("upload large file completed");
-                  // large files track progress differently
-                  // so we have to manually set it to done
-                  fileDat.bytes = {
-                    total: fileDat.bytes.total,
-                    done: fileDat.bytes.total,
-                    failed: 0
-                  };
-                  onUploadComplete(
-                    fileDat,
-                    data,
-                    uploadInfo[0],
-                    resolve,
-                    reject
-                  );
-                })
-                .catch(err => {
-                  // upload might have finished
-                  // we need to confirm (after 5 seconds)
-                  console.log("checking upload status..");
-                  setTimeout(() => {
-                    b2.getFileInfo(data.fileId)
-                      .then(({ data }) =>
-                        onUploadComplete(
-                          fileDat,
-                          data,
-                          uploadInfo[0],
-                          resolve,
-                          reject
-                        )
+              .catch(err => {
+                // upload might have finished
+                // we need to confirm (after 5 seconds)
+                console.log("checking upload status..");
+                setTimeout(() => {
+                  b2.getFileInfo(data.fileId)
+                    .then(({ data }) =>
+                      onUploadComplete(
+                        fileDat,
+                        data,
+                        initVect,
+                        uploadInfo[0],
+                        resolve,
+                        reject
                       )
-                      .catch(() =>
-                        onUploadFail(
-                          fileDat,
-                          err,
-                          uploadInfo[0],
-                          resolve,
-                          reject
-                        )
-                      );
-                  }, 5000);
-                });
-            });
-            //jshint ignore:end
+                    )
+                    .catch(err => onFail(err));
+                }, 5000);
+              });
             /**
              * This function will hold a promise to upload a chunk of a large file.
              * It is executed when the preceeding promise is successful (in order to save memory).
@@ -1083,7 +1199,7 @@ function uploadLargeFile(fileDat) {
              * @param {number} partLength
              */
             function holdPartPromise(partNumber, partStart, partLength) {
-              return () => {
+              return fileDescriptor => {
                 // init progress tracker before starting
                 let partProgress = (fileDat.parts[partNumber - 1] = {
                   number: partNumber,
@@ -1092,57 +1208,80 @@ function uploadLargeFile(fileDat) {
                   bytes: {}
                 });
                 saveScheduleSync(currentSchedule);
-                return new Promise((resolve, reject) => {
-                  setTimeout(() => {
-                    b2.getUploadPartUrl({
-                      fileId: data.fileId
-                    })
-                      .then(({ data }) => {
-                        console.log(partNumber, "got url");
-                        encryptAndCompress(
-                          fs.createReadStream(fileDat.path, {
-                            start: partStart,
-                            end: partStart + partLength - 1
-                          }),
-                          userId,
-                          partNumber == 1,
-                          partNumber == 1,
-                          initVect
-                        )
-                          .then(fileBuffer => {
-                            if (partNumber == 1) {
-                              initVect = fileBuffer[0];
-                              fileBuffer = fileBuffer[1];
-                            }
-                            b2.uploadPart({
-                              partNumber: partNumber,
-                              uploadUrl: data.uploadUrl,
-                              uploadAuthToken: data.authorizationToken,
-                              data: fileBuffer,
-                              onUploadProgress: e =>
-                                onUploadProgress(fileDat, e, partNumber)
-                            })
-                              .then(({ data }) => {
-                                console.log(partNumber, "part done");
-                                partSha1Array[partNumber] = data.contentSha1;
-                                // mark progress tracker as complete
-                                partProgress.done = true;
-                                partProgress.contentSha1 = data.contentSha1;
-                                fileDat.bytes.done += partProgress.bytes.done;
-                                saveScheduleSync(currentSchedule);
-                                resolve();
-                              })
-                              .catch(reject);
-                          })
-                          .catch(reject);
+                let fileBuffer;
+                let retried = false;
+                let partPromise = () =>
+                  new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                      b2.getUploadPartUrl({
+                        fileId: data.fileId
                       })
-                      .catch(err => {
-                        console.log(partNumber, "part failed");
-                        fileDat.failedOnUrl = true;
-                        reject(err);
-                      });
-                  }, 3000);
-                });
+                        .then(({ data }) => {
+                          console.log(partNumber, "got url");
+                          console.log(partNumber, "allocating", partLength);
+                          fileBuffer = Buffer.alloc(partLength);
+                          console.log(
+                            partNumber,
+                            "reading",
+                            `[${partStart} >> ${partStart + partLength})`
+                          );
+                          fs.readSync(
+                            fileDescriptor,
+                            fileBuffer,
+                            0,
+                            partLength,
+                            partStart
+                          );
+                          console.log(partNumber, "uploading", partLength);
+                          b2.uploadPart({
+                            partNumber: partNumber,
+                            uploadUrl: data.uploadUrl,
+                            uploadAuthToken: data.authorizationToken,
+                            data: fileBuffer,
+                            onUploadProgress: e =>
+                              onUploadProgress(fileDat, e, partNumber)
+                          })
+                            .then(({ data }) => {
+                              console.log(partNumber, "part done");
+                              partSha1Array[partNumber] = data.contentSha1;
+                              // mark progress tracker as complete
+                              partProgress.done = true;
+                              partProgress.contentSha1 = data.contentSha1;
+                              fileDat.bytes.done += partProgress.bytes.done;
+                              saveScheduleSync(currentSchedule);
+                              resolve();
+                            })
+                            .catch(err => {
+                              console.log(err);
+                              if (
+                                !retried &&
+                                err &&
+                                err.data &&
+                                err.data.status == 503
+                              ) {
+                                console.log(
+                                  "b2 is busy, waiting 5 seconds to try again..."
+                                );
+                                setTimeout(() => {
+                                  retried = true;
+                                  fileBuffer = null;
+                                  partPromise()
+                                    .then(resolve)
+                                    .catch(reject);
+                                }, 5000);
+                              } else {
+                                reject(err);
+                              }
+                            });
+                        })
+                        .catch(err => {
+                          console.log(partNumber, "part failed");
+                          fileDat.failedOnUrl = true;
+                          reject(err);
+                        });
+                    }, 5000);
+                  });
+                return partPromise();
               };
             }
           })
@@ -1151,6 +1290,24 @@ function uploadLargeFile(fileDat) {
           );
       })
       .catch(reject);
+  });
+}
+
+function holdEncryptedFile(fileDat) {
+  return new Promise((resolve, reject) => {
+    fs.mkdir(HOLD_DIR, { recursive: true }, err => {
+      if (err) return reject(err);
+      let heldFilePath = `${HOLD_DIR}/${
+        pathParse(fileDat.path).base
+      }.incomplete`;
+      encryptAndCompress(
+        fs.createReadStream(fileDat.path),
+        userId,
+        fs.createWriteStream(heldFilePath)
+      )
+        .then(initVect => resolve([initVect, heldFilePath]))
+        .catch(reject);
+    });
   });
 }
 
@@ -1187,7 +1344,9 @@ function onUploadProgress(fileDat, event, pn) {
  * @param {Function} reject
  */
 function onUploadFail(fileDat, err, session, resolve, reject) {
-  session.abortTransaction();
+  try {
+    session.abortTransaction();
+  } catch (err2) {}
   fileDat.bytes.failed = fileDat.bytes.total - fileDat.bytes.done;
   // Retry the upload *once* if BackBlaze failed
   // to provide an upload URL.
@@ -1244,16 +1403,17 @@ function onUploadFail(fileDat, err, session, resolve, reject) {
  * Handles successful uploads
  * @param {"FileDat"} fileDat
  * @param {"B2 FileInfo"} data
+ * @param {Buffer} initVect
  * @param {mongoose.ClientSession} session
  * @param {Function} resolve
  * @param {Function} reject
  */
-function onUploadComplete(fileDat, data, session, resolve, reject) {
-  let now = new Date().getTime();
+function onUploadComplete(fileDat, data, initVect, session, resolve, reject) {
+  let now = Date.now();
   let ipAddress = ip.address("public", "ipv6") || ip.address("public", "ipv4");
   // Update the file doc in MongoDB this
   // verifies the upload completed successfuly
-  console.log("fileDat.size", fileDat.size);
+  console.log("fileDat.size", fileDat.size, "isNew", !!fileDat.isNew);
   let fileDoc = {
     idInDatabase: data.fileId,
     nameInDatabase: data.fileName,
@@ -1268,7 +1428,8 @@ function onUploadComplete(fileDat, data, session, resolve, reject) {
           {
             idInDatabase: data.fileId,
             dateInserted: now,
-            originalSize: fileDat.size
+            originalSize: fileDat.size,
+            initVect
           }
         ],
         $sort: { dateInserted: -1 }
@@ -1337,7 +1498,7 @@ function onUploadComplete(fileDat, data, session, resolve, reject) {
         // it was updated. See the File.findOneAndUpdate(...) options above
         $inc: {
           latestSize:
-            (fileDat.isNew ? 0 : -fileInMongoDB.latestSize) + fileDat.size
+            (fileDat.isNew ? 0 : -fileInMongoDB.latestSize || 0) + fileDat.size
         }
       };
       if (fileDat.isNew) {
@@ -1421,7 +1582,7 @@ function removeFile(fileDat) {
                   fileName: file.nameInDatabase
                 })
                   .then(() => {
-                    let now = new Date().getTime();
+                    let now = Date.now();
                     let ipAddress =
                       ip.address("public", "ipv6") ||
                       ip.address("public", "ipv4");

@@ -2,9 +2,10 @@
 app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
   const fs = require("fs");
   const G = $rootScope.G;
-  var Block = G.clientModels.Block;
-  var File = G.clientModels.File;
-  var Download = G.clientModels.Download;
+  const Block = G.clientModels.Block;
+  const File = G.clientModels.File;
+  const Download = G.clientModels.Download;
+  //TODO cancel download
 
   // ---------------------------------------
 
@@ -165,6 +166,8 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
             1
           );
           requestDownloadResponse.allow = true;
+          requestDownloadResponse.reject = reject;
+          requestDownloadResponse.resolve = resolve;
           filesToDownload = filesToDownload.map(f => f.toString());
           G.ipcRenderer.send("download-request", filesToDownload, releasePath);
         });
@@ -212,90 +215,92 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
         }
         let query;
         if (status.downloadId) {
-          query = { _id: status.downloadId };
+          query = { _id: status.downloadId, active: true };
         } else {
           query = { user: G.user._id, active: true };
         }
-        Download.findOne(query, status.downloadProjection, (err, download) => {
-          if (err) return reject(["Couldn't update download status", err]);
-          if (download) {
-            status.parseDownload(download);
-          } else if (status.downloadId) {
+        Download.aggregate(
+          [
+            { $match: query },
+            { $limit: 1 },
+            {
+              $project: {
+                _id: 1,
+                files: "$files.list",
+                complete: "$complete",
+                log: "$log"
+              }
+            },
+            { $unwind: "$files" },
+            {
+              $group: {
+                _id: "$_id",
+                files: {
+                  $push: {
+                    capturedDate: "$files.capturedDate",
+                    decryptedDate: "$files.decryptedDate"
+                  }
+                },
+                complete: {$first: "$complete"},
+                log: {$first: "$log"}
+              }
+            }
+          ],
+          (err, download) => {
+            if (err) return reject(["Couldn't update download status", err]);
+            download = download[0];
+            console.log(download);
+            if (download) {
+              status.parseDownload(download);
+            } else if (status.downloadId) {
+              status.downloadId = null;
+              return reject(["Couldn't find a download with that id"]);
+            }
             status.downloadId = null;
-            return reject(["Couldn't find a download with that id"]);
+            resolve();
           }
-          status.downloadId = null;
-          resolve();
-        });
+        );
       });
     },
     parseDownload: download => {
-      console.log(JSON.stringify(download));
+      console.log(download);
       status.progress = {
-        // by this I mean the process has started
-        started:
-          download.log.taskStartDate &&
-          Date.now() >= download.log.taskStartDate,
-        packaged: Boolean(download.log.packagedDate),
-        downloaded: Boolean(download.log.downloadFinishDate),
-        isReady: Boolean(download.log.completedDate)
+        complete: download.complete
       };
       $interval.cancel(status.refreshTask);
       if (!status.progress.isReady) {
-        let deadline = new Date(download.finishBy.date);
+        let deadline = new Date(download.finishBy);
         let deadlineTime = G.dateToTime(deadline);
         let deadlineDiff =
-          Math.abs(deadline.getTime() - new Date().getTime()) / 86400000;
+          Math.abs(deadline.getTime() - Date.now()) / 86400000;
         if (deadlineDiff == 0) {
-          status.progress.finishBy = `Today ${deadlineTime.hours}:${
+          status.progress.finishBy = `Today at ${deadlineTime.simpleHours}:${
             deadlineTime.minutes
-          }`;
+          } ${deadlineTime.isAm ? "AM" : "PM"}`;
         } else if (deadlineDiff == 1) {
-          status.progress.finishBy = `Tomorrow ${deadlineTime.hours}:${
+          status.progress.finishBy = `Tomorrow at ${deadlineTime.simpleHours}:${
             deadlineTime.minutes
-          }`;
+          } ${deadlineTime.isAm ? "AM" : "PM"}`;
         } else {
-          status.progress.finishBy = `${G.daysOfWeek[deadline.getDay()]} ${
-            deadlineTime.hours
-          }:${deadlineTime.minutes}`;
+          status.progress.finishBy = `${G.daysOfWeek[deadline.getDay()]} at ${
+            deadlineTime.simpleHours
+          }:${deadlineTime.minutes} ${deadlineTime.isAm ? "AM" : "PM"}`;
         }
-        if (status.progress.started) {
-          let step;
-          if (status.progress.packaged) {
-            if (status.progress.downloaded) {
-              step = "decrypt";
-            } else {
-              step = "download";
-            }
-          } else {
-            step = "package";
-          }
-          status.progress.current = {
-            step,
-            left: true,
-            right: false
-          };
-          let left = 85;
-          status.refreshTask = $interval(
-            () => {
-              left--;
-              status.progress.current.left = !status.progress.current.left;
-              status.progress.current.right = !status.progress.current.right;
-              if (left <= 1 && status.autoRefreshTimes < 9) {
-                status
-                  .refresh(true)
-                  .then(() => $scope.$apply())
-                  .catch(err =>
-                    $scope.$apply(
-                      G.notifyError("Couldn't refresh download status", err)
-                    )
-                  );
-              }
-            },
-            700,
-            85
-          );
-          console.log(status.progress);
+        let totalCount = download.files.length;
+        let capturedRatio = download.files.reduce((acc, cur) => acc += (cur.capturedDate ? 1:0), 0) / totalCount;
+        let decryptedRatio = download.files.reduce((acc, cur) => acc += (cur.decryptedDate ? 1:0), 0) / totalCount;
+        console.log(totalCount, capturedRatio, decryptedRatio);
+        status.progress.capturedPercent = Math.round(capturedRatio*100);
+        status.progress.decryptedPercent = Math.round(decryptedRatio*100);
+        if (capturedRatio == 0) {
+          status.progress.capturedClass = "{'flex-grow': 0.01}";
+        } else {
+          status.progress.capturedClass = `{'flex-grow': ${capturedRatio.toFixed(2)}}`;
+        }
+        if (decryptedRatio == 0) {
+          status.progress.decryptedClass = "{'flex-grow': 0.01}";
+        } else {
+          status.progress.decryptedClass = `{'flex-grow': ${decryptedRatio.toFixed(2)}}`;
         }
       } else {
         status.showDownload = () => {

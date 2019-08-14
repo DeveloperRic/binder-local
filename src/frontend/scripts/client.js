@@ -12,8 +12,6 @@ WHERE CONSTANTS, STATE_VARS AND COMMONLY-USED FUNCTIONS
 WILL BE HELD.
 */
 
-//TODO let user know when there's no internet
-
 app.run(function($rootScope, $cookies) {
   const { remote, ipcRenderer } = require("electron");
   const { getAccessToken, getProfile } = remoteRequire("services/auth-service");
@@ -41,6 +39,7 @@ app.run(function($rootScope, $cookies) {
     getUser,
     user: {},
     profile: getProfile(),
+    logoName: "logo",
     switchStage,
     stageStack: {
       stack: stageStack,
@@ -181,21 +180,17 @@ app.run(function($rootScope, $cookies) {
     if (!projection.plan) {
       projection["plan.expired"] = 1;
     }
-    User.findOne(
-      { email: G.profile.email },
-      projection,
-      (err, user) => {
-        if (err) return callback(err);
-        if (!user) {
-          return callback(new Error("Logged in user not found in MongoDB"));
-        }
-        if (!user.email_verified || user.plan.expired) {
-          // TODO what happens when a user's plan expires?
-          user.plan = null;
-        }
-        callback(false, user);
+    User.findOne({ email: G.profile.email }, projection, (err, user) => {
+      if (err) return callback(err);
+      if (!user) {
+        return callback(new Error("Logged in user not found in MongoDB"));
       }
-    ).lean(true);
+      if (!user.email_verified || (user.plan && user.plan.expired)) {
+        // TODO what happens when a user's plan expires?
+        user.plan = null;
+      }
+      callback(false, user);
+    }).lean(true);
   }
   function logout(callback) {
     setImmediate(() => {
@@ -270,13 +265,21 @@ app.run(function($rootScope, $cookies) {
   }
   function dateToTime(date) {
     let pad = (num, size) => ("000" + num).slice(size * -1);
+    let hours = date.getHours();
     return {
-      hours: pad(date.getHours(), 2),
+      hours: pad(hours, 2),
       minutes: pad(date.getMinutes(), 2),
       seconds: pad(date.getSeconds(), 2),
-      ms: pad(date.getMilliseconds(), 3)
+      ms: pad(date.getMilliseconds(), 3),
+      simpleHours: hours % 12,
+      isAm: !(hours > 12 || hours == 0)
     };
   }
+  G.ipcRenderer.removeAllListeners("client-internet-check");
+  G.ipcRenderer.on("client-internet-check", (event, connected) => {
+    G.logoName = connected ? "logo" : "logo-offline";
+    $rootScope.$apply();
+  });
   G.shortMonths = [
     "Jan",
     "Feb",
@@ -314,5 +317,5 @@ app.run(function($rootScope, $cookies) {
     "Saturday",
     "Sunday"
   ];
-  G.switchStage(DEV_MODE ? "explore" : "home");
+  G.switchStage(DEV_MODE ? "plans" : "home");
 });

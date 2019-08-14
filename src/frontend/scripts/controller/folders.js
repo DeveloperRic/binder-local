@@ -2,10 +2,9 @@
 app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
   const pathParse = require("path-parse");
   const G = $rootScope.G;
-  var File = G.clientModels.File;
-  var Block = G.clientModels.Block;
-
-  // TODO allow users to force upload now
+  const { normalisePath } = G.require("services/coordination");
+  const File = G.clientModels.File;
+  const Block = G.clientModels.Block;
 
   // ---------------------------------------
 
@@ -313,7 +312,6 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
                 action: "File detected in file system",
                 timestamp: new Date(file.log.detected)
               });
-              console.log(JSON.parse(JSON.stringify(file)));
               processLogs(file.log.updateHistory.list, "File updated");
               processLogs(file.log.binnedHistory.list, "File binned");
               processLogs(file.log.restoredHistory.list, "File restored");
@@ -334,9 +332,9 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
           { owner: G.user._id },
           {
             "log.provisionedDate": 1,
-            "log.blockBinnedHistory": { $slice: 6 },
-            "log.blockRestoredHistory": { $slice: 6 },
-            "log.blockMergedHistory": 1,
+            "log.blockBinnedHistory.list": { $slice: 6 },
+            "log.blockRestoredHistory.list": { $slice: 6 },
+            "log.blockMergedHistory.list": 1,
             "log.latestSizeCalculationDate": 1
           },
           (err, blocks) => {
@@ -348,9 +346,12 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
                   timestamp: new Date(block.log.provisionedDate)
                 });
               }
-              processLogs(block.log.blockBinnedHistory, "Block binned");
-              processLogs(block.log.blockRestoredHistory, "Block restored");
-              processLogs(block.log.blockMergedHistory, "Blocks merged");
+              processLogs(block.log.blockBinnedHistory.list, "Block binned");
+              processLogs(
+                block.log.blockRestoredHistory.list,
+                "Block restored"
+              );
+              processLogs(block.log.blockMergedHistory.list, "Blocks merged");
               if (block.log.latestSizeCalculationDate) {
                 items.push({
                   action: "Block size re-calculated",
@@ -405,17 +406,14 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
     $scope.$apply();
   });
 
-  function normalisePath(path) {
-    return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");
-  }
-
   function smallerPath(path, estLength) {
     let orgLength = path.length;
-    path = path.substr(path.length - estLength, estLength);
+    let startIndex = path.length - estLength;
+    path = path.substr(startIndex < 0 ? 0 : startIndex, estLength);
     if (path.includes("/")) {
       path = path.substr(path.indexOf("/"));
     } else if (orgLength > estLength) {
-      path = "..." + path;
+      path = "…" + path;
     }
     return path;
   }

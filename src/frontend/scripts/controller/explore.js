@@ -3,9 +3,14 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
   const pathParse = require("path-parse");
   const pathToRegex = require("path-to-regexp");
   const G = $rootScope.G;
-  var File = G.clientModels.File;
+  const { findCommonPrefix, normalisePath } = G.require(
+    "services/coordination"
+  );
+  const File = G.clientModels.File;
 
   //TODO specific history for each file
+  // TODO allow users to force upload now
+  // TODO notify user of files held in database that no longer exist in fs
 
   // ---------------------------------------
 
@@ -125,7 +130,7 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
                 });
                 folders = folders[1].map(f => {
                   let explorePath =
-                    commonPrefix.replace(root, "") + f.name + "/(.*)";
+                    commonPrefix.replace(root, "") + f.fullName + "/(.*)";
                   if (explorePath.startsWith("/")) {
                     explorePath = explorePath.substr(1);
                   }
@@ -182,7 +187,6 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
         }
 
         function formatSize(size) {
-          console.log(size);
           if (size >= 1073741824) {
             return `${(size / 1073741824).toFixed(1)} Gb`;
           } else if (size >= 1048576) {
@@ -201,13 +205,14 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
           while ((item = list[0])) {
             let slashIndex = item.localPath.indexOf("/", length + 1);
             if (slashIndex >= 0) {
-              item.name = smallerPath(
-                item.localPath.substr(length, slashIndex - length),
-                40
+              item.fullName = item.localPath.substr(
+                length,
+                slashIndex - length
               );
+              item.name = smallerPath(item.fullName, 30);
               folders.push(list.shift());
             } else {
-              item.name = smallerPath(item.localPath.substr(length), 45);
+              item.name = smallerPath(item.localPath.substr(length), 40);
               files.push(list.shift());
             }
           }
@@ -219,6 +224,7 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
               folder.fileCount++;
             } else {
               groups.push({
+                fullName: item.fullName,
                 name: item.name,
                 latestSize: item.latestSize,
                 fileCount: 1
@@ -227,35 +233,6 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
             folders.shift();
           }
           return [files, groups];
-        }
-
-        function findCommonPrefix(files) {
-          if (files.length == 0) return "";
-          for (let i in files) {
-            files[i].localPath = normalisePath(files[i].localPath);
-          }
-          let oldNextPrefix;
-          let nextPrefix = files[0].localPath.substr(
-            0,
-            files[0].localPath.indexOf("/") + 1
-          );
-          let commonPrefix = "";
-          while (nextPrefix) {
-            if (
-              files.findIndex(f => !f.localPath.startsWith(nextPrefix)) >= 0
-            ) {
-              break;
-            }
-            commonPrefix = nextPrefix;
-            nextPrefix += files[0].localPath.substr(
-              nextPrefix.length,
-              files[0].localPath.indexOf("/", nextPrefix.length + 1) -
-                nextPrefix.length
-            );
-            if (nextPrefix == oldNextPrefix) break;
-            oldNextPrefix = nextPrefix;
-          }
-          return commonPrefix;
         }
       }).then(() => {
         source.status = "";
@@ -276,7 +253,7 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
       });
     },
     select: file => {
-      let index = source.selected.indexOf(file.localPath)
+      let index = source.selected.indexOf(file.localPath);
       //TODO handle context menu on multi-select
       if (index < 0) {
         source.selected.length = 0;
@@ -362,17 +339,14 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
     });
   }
 
-  function normalisePath(path) {
-    return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");
-  }
-
   function smallerPath(path, estLength) {
     let orgLength = path.length;
-    path = path.substr(path.length - estLength, estLength);
+    let startIndex = path.length - estLength;
+    path = path.substr(startIndex < 0 ? 0 : startIndex, estLength);
     if (path.includes("/")) {
       path = path.substr(path.indexOf("/"));
     } else if (orgLength > estLength) {
-      path = "..." + path;
+      path = "…" + path;
     }
     return path;
   }

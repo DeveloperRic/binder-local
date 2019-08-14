@@ -8,7 +8,7 @@ app.controller("helpCtrl", function($scope, $rootScope, $http) {
     status: "waiting"
   });
 
-  var guides = $scope.guides = [
+  var guides = ($scope.guides = [
     {
       name: "Purchasing a plan",
       stage: "helpPlan"
@@ -25,11 +25,9 @@ app.controller("helpCtrl", function($scope, $rootScope, $http) {
       name: "Managing your Binder",
       stage: "helpBinder"
     }
-  ];
+  ]);
 
-  var faqs = $scope.faqs = [
-    
-  ];
+  var faqs = ($scope.faqs = []);
 
   // ---------------------------------------
 

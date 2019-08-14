@@ -31,6 +31,7 @@ body.darkmode #home * {
 
 #home .content {
   height: 100%;
+  margin: 15px 30px;
 }
 
 #home .content .outer-row {
@@ -54,6 +55,10 @@ body.darkmode #home * {
   text-align: center;
 }
 
+#home .uploads .info * {
+  font-size: 14px;
+}
+
 #home .uploads .circle-graph {
   display: flex;
   flex-direction: column;
@@ -61,19 +66,10 @@ body.darkmode #home * {
 }
 
 #home .uploads .circle-graph #circle-graph {
+  max-width: 100px;
+  max-height: 100px;
   margin-top: 20px;
   margin-bottom: 20px;
-}
-
-#home .uploads .parts {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-}
-
-#home .uploads .parts .part {
-  display: flex;
-  justify-content: space-between;
 }
 
 #home .uploads .queue-title {
@@ -83,6 +79,12 @@ body.darkmode #home * {
 
 #home .uploads ol {
   padding-left: 10px;
+}
+
+#home .uploads ol li {
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
 }
 
 #home .space {

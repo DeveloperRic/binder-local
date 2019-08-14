@@ -74,16 +74,16 @@ module.exports = {
       findOne: (query, projection, callback) => {
         return User.findOne(query, projection, callback);
       },
-      create: (doc, callback) => {
-        return User.create(doc, callback);
-      },
-      update: (query, doc, cb) => {
+      updateOne: (query, doc, cb) => {
         return User.updateOne(query, doc, cb);
       }
     },
     Block: {
       find: (query, projection, callback) => {
         return Block.find(query, projection, callback);
+      },
+      aggregate: (aggregations, callback) => {
+        return Block.aggregate(aggregations, callback);
       }
     },
     Tier: {
@@ -102,6 +102,9 @@ module.exports = {
     Download: {
       findOne: (query, projection, callback) => {
         return Download.findOne(query, projection, callback);
+      },
+      aggregate: (aggregations, callback) => {
+        return Download.aggregate(aggregations, callback);
       }
     }
   }

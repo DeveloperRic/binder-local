@@ -47,14 +47,14 @@ block component
       p
         | When a file change is discovered, Binder schedules it for archiving.
         |  It's possible for tens to hundreds of files to be sheduled for archive at the same time.
-        |  This creates problems with how your data is stored -- too much incoming traffic can 'overwhelm' the database where your files live.
+        |  This creates problems with how your data is stored (too much incoming traffic can 'overwhelm' the database where your files live.)
       p
         | This is why smaller plans have slower archive speeds, because they cannot handle all that incoming traffic.
       h3 Retrieve Speeds
       p
         | The whole purpose of backing up your data to the cloud is to access it in a time of need.
-        |  Data retrievals, similar to archives, can 'overwhelm' a database. Hence, smaller plans have slower retrieval speeds.
-      p Another reason for throttling is because retrievals involve unarchiving up to hundreds of gigabytes at a time, which can be very memory intensive depending on your plan.
+        |  Data retrievals -- similar to archives -- can 'overwhelm' a database. Hence, smaller plans have slower retrieval speeds.
+      p Another reason for throttling is because retrievals involve decrypting up to hundreds of gigabytes at a time, which, depending on your plan, can be very resource intensive.
       h3 File Versioning
       p
         | File versioning is the process of keeping the old copies of your files even after they are updated.
@@ -127,7 +127,7 @@ block component
                   button.bg-secondary(ng-click="billing.cancel()") Cancel
                   button.bg-accent.color-inverse(type="submit") Continue
             .block.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'", ng-class="{'w3-animate-zoom': true}")
-              form#payment-form(action='/charge', method='post')
+              form#payment-form(action='/charge', method='post', ng-class="{'paying-cursor': billing.status == 'loading'}")
                 .form-row
                   label(for='card-element') Credit or debit card
                   #card-element
@@ -136,9 +136,17 @@ block component
                   #card-errors(role='alert')
                 .buttons
                   button.bg-secondary(ng-click="billing.stage = 'info'") Back
-                  button.bg-accent.color-inverse(type="submit") Submit Payment
+                  button.bg-accent.color-inverse.checkout(type="submit", ng-disabled="billing.status == 'loading'")
+                    | Submit Payment
+                    i.material-icons https
             .block.paying.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='loading'", ng-class="{'w3-animate-zoom': true}")
-              | Confirming your payment
+              div
+                | Confirming your payment
+                br
+                | This could take a little while
+              | !{horzSpinner}
+            .block.paying.warn.color-inverse.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='auth'", ng-class="{'w3-animate-zoom': true}")
+              | Authenticating your card
               | !{horzSpinner}
             .block.paying.bg-primary.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='success'", ng-class="{'w3-animate-zoom': true}")
               div
@@ -154,6 +162,12 @@ block component
                 | Restarting in {{billing.restartCountdown}} {{billing.restartCountdown == 1 ? 'second' : 'seconds'}}..
               | !{horzSpinner}
               i.material-icons.color-accent done
+            .block.paying.error-popup.color-inverse.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='declined'", ng-class="{'w3-animate-zoom': true}")
+              div
+                | Your card was declined
+                br
+                | Please check your details and try again
+              i.material-icons error_outline
             .block.paying.error-popup.color-inverse.drop-shadow-strong(ng-show="billing.stage == 'stripe'&&billing.status=='error'", ng-class="{'w3-animate-zoom': true}")
               div
                 | Something's gone wrong!

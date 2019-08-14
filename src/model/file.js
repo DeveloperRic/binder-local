@@ -10,7 +10,8 @@ var fileSchema = mongoose.Schema({
   idInDatabase: {
     type: String,
     required: true,
-    index: true
+    index: true,
+    unique: true
   },
   nameInDatabase: {
     type: String,
@@ -95,6 +96,10 @@ var fileSchema = mongoose.Schema({
           },
           originalSize: {
             type: Number,
+            required: true
+          },
+          initVect: {
+            type: String,
             required: true
           }
         }

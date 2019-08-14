@@ -61,40 +61,96 @@ var blockSchema = mongoose.Schema({
       type: Number
     },
     fileAddHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     fileBinnedHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     fileRestoredHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     blockBinnedHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     blockRestoredHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     blockMergedHistory: {
-      type: [historyItemSchema],
-      default: []
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     },
     lastestSizeCalculationDate: {
       type: Number
     },
     sizeHistory: {
-      type: [
-        {
-          date: { type: Number, required: true },
-          size: { type: Number, required: true }
-        }
-      ],
-      default: () => [{ date: Date.now(), size: 0 }]
+      list: {
+        type: [
+          {
+            date: { type: Number, required: true },
+            size: { type: Number, required: true }
+          }
+        ],
+        default: () => [{ date: Date.now(), size: 0 }]
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
     }
   }
 });

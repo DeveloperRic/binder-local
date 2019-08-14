@@ -1,7 +1,7 @@
 const fs = require("fs");
 const pathParse = require("path-parse");
 const ip = require("ip");
-const { resolveDir } = require("../prodVariables");
+const { PROD_DEV_MODE, resolveDir } = require("../prodVariables");
 
 var File = require("../model/file");
 var uploadService;
@@ -127,7 +127,7 @@ function selectFile(path, include) {
       path: path,
       mtimeMs: fs.statSync(path).mtimeMs, // is corrected below
       ignore: false,
-      detected: new Date().getTime()
+      detected: Date.now()
     };
     // if you want to include and the corresponding folder
     // was not found, insert one (including the new file)
@@ -215,27 +215,29 @@ function task() {
             path: filePath,
             mtimeMs: 0, // is corrected below
             ignore: false,
-            detected: new Date().getTime()
+            detected: Date.now()
           })
         );
       }
       // skip if file is ignored
       // (absolutely won't skip if file's new)
       if (storedDat.ignore) continue;
-      if (stat.mtimeMs > storedDat.mtimeMs) {
-        // declare a changed file
-        changed.push({
-          directory: directory.path,
-          path: filePath,
-          modified: stat.mtimeMs,
-          size: stat.size,
-          bytes: {
-            total: stat.size,
-            done: 0,
-            failed: 0
-          }
-        });
-      }
+      // if (stat.mtimeMs > storedDat.mtimeMs) {
+      // ^ This has been removed to ensure changes are always checked with the backend
+
+      // declare a changed file
+      changed.push({
+        directory: directory.path,
+        path: filePath,
+        modified: stat.mtimeMs,
+        size: stat.size,
+        bytes: {
+          total: stat.size,
+          done: 0,
+          failed: 0
+        }
+      });
+
       // update stored modified time
       // NOTE: this doesn't guarantee a
       //  fully processed update
@@ -254,7 +256,7 @@ function task() {
         removed.push({
           directory: directory.path,
           path: file.path,
-          detected: new Date().getTime()
+          detected: Date.now()
         });
         // remove the file from the directoryStore
         directory.files.splice(
@@ -275,11 +277,15 @@ function task() {
     return;
   }
   // process declared changes/removals
-  console.log("spider > upload-service");
+  if (PROD_DEV_MODE) {
+    console.log("spider > upload-service");
+  }
   uploadService
     .processChanges(changed, removed)
     .then(() => {
-      console.log("spider > upload-service (done)");
+      if (PROD_DEV_MODE) {
+        console.log("spider > upload-service (done)");
+      }
       processing = false;
       if (wasCancelled) {
         wasCancelled = false;
@@ -291,6 +297,7 @@ function task() {
       if (err) {
         console.error(err);
         if (err.processingBlocked) {
+          // TODO add a service that will notify when the spider cannot continue
           // NOTE spider will stop forever if processing
           // was blocked. Client will need to restart it
           // (usually after plan renewal)
@@ -330,8 +337,6 @@ function pullDirectoryStore() {
           for (let i in files) {
             const file = files[i];
             const path = pathParse(file.localPath);
-            // TODO notify user of files held in database
-            // that no longer exist in fs
             if (!fs.existsSync(file.localPath)) {
               if (!file.binned) {
                 // minimise internet usage by performing

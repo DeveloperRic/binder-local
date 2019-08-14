@@ -3,7 +3,8 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
   const pathParse = require("path-parse");
   const speedTest = require("speedtest-net");
   const G = $rootScope.G;
-  var File = G.clientModels.File;
+  const { normalisePath } = G.require("services/coordination");
+  const File = G.clientModels.File;
 
   // ---------------------------------------
 
@@ -73,7 +74,7 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
               archiveTime = 0;
             let changeCount = 0;
             let minDetected;
-            let now = new Date().getTime();
+            let now = Date.now();
             files.forEach(file => {
               if (file.upload.started && file.upload.finished) {
                 let time = file.upload.finished - file.upload.started;
@@ -86,7 +87,7 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
                 archiveSize += file.latestSize;
                 archiveTime += time;
               }
-              changeCount += file.versions.length;
+              changeCount += file.versions.count;
               if (!minDetected || file.log.detected < minDetected) {
                 minDetected = file.log.detected;
               }
@@ -174,44 +175,48 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
           };
         }
         console.log(query);
-        File.find(query, { localPath: 1, "versions.count": 1 }, (err, files) => {
-          if (err) return reject(["Couldn't load active files/folders", err]);
-          files = files.map(file => {
-            return {
-              path: file.localPath,
-              versionCount: file.versions.count
-            };
-          });
-          actives.folders.length = 0;
-          actives.files.length = 0;
-          files.forEach(item => {
-            let dir = pathParse(item.path).dir;
-            let folder = actives.folders.find(f => f.actualPath == dir);
-            if (!folder) {
-              actives.folders.push({
-                actualPath: dir,
-                path: smallerPath(normalisePath(dir), 30),
+        File.find(
+          query,
+          { localPath: 1, "versions.count": 1 },
+          (err, files) => {
+            if (err) return reject(["Couldn't load active files/folders", err]);
+            files = files.map(file => {
+              return {
+                path: file.localPath,
+                versionCount: file.versions.count
+              };
+            });
+            actives.folders.length = 0;
+            actives.files.length = 0;
+            files.forEach(item => {
+              let dir = pathParse(item.path).dir;
+              let folder = actives.folders.find(f => f.actualPath == dir);
+              if (!folder) {
+                actives.folders.push({
+                  actualPath: dir,
+                  path: smallerPath(normalisePath(dir), 30),
+                  versionCount: item.versionCount
+                });
+              } else {
+                folder.versionCount += item.versionCount;
+              }
+              actives.files.push({
+                actualPath: item.path,
+                path: smallerPath(normalisePath(item.path), 30),
                 versionCount: item.versionCount
               });
-            } else {
-              folder.versionCount += item.versionCount;
-            }
-            actives.files.push({
-              actualPath: item.path,
-              path: smallerPath(normalisePath(item.path), 30),
-              versionCount: item.versionCount
             });
-          });
-          actives.folders = actives.folders.sort(
-            (a, b) => b.versionCount - a.versionCount
-          );
-          actives.files = actives.files.sort(
-            (a, b) => b.versionCount - a.versionCount
-          );
-          actives.folders.splice(5);
-          actives.files.splice(5);
-          resolve();
-        }).sort({ "log.detected": -1 });
+            actives.folders = actives.folders.sort(
+              (a, b) => b.versionCount - a.versionCount
+            );
+            actives.files = actives.files.sort(
+              (a, b) => b.versionCount - a.versionCount
+            );
+            actives.folders.splice(5);
+            actives.files.splice(5);
+            resolve();
+          }
+        ).sort({ "log.detected": -1 });
       });
     }
   });
@@ -258,17 +263,13 @@ app.controller("statsCtrl", function($scope, $rootScope, $interval) {
     });
   }
 
-  function normalisePath(path) {
-    return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");
-  }
-
   function smallerPath(path, estLength) {
     let orgLength = path.length;
     path = path.substr(path.length - estLength, estLength);
     if (path.includes("/")) {
       path = path.substr(path.indexOf("/"));
     } else if (orgLength > estLength) {
-      path = "..." + path;
+      path = "…" + path;
     }
     return path;
   }

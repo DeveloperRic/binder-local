@@ -1,5 +1,6 @@
 const { remote } = require("electron");
 const axios = require("axios");
+const { API_DOMAIN } = remote.require("./prodVariables");
 const authService = remote.require("./services/auth-service");
 const authProcess = remote.require("./frontend/app/auth-process");
 
@@ -21,7 +22,7 @@ document.getElementById("logout").onclick = () => {
 
 document.getElementById("secured-request").onclick = () => {
   axios
-    .get("http://localhost:3000/api/client/auth/private", {
+    .get(`${API_DOMAIN}/client/auth/private`, {
       headers: {
         Authorization: `Bearer ${authService.getAccessToken()}`
       }

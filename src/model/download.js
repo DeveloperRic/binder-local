@@ -55,6 +55,10 @@ var downloadSchema = mongoose.Schema({
       type: Number,
       min: 0,
       required: true
+    },
+    commonPrefix: {
+      type: String,
+      required: true
     }
   },
   active: {

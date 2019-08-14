@@ -1,6 +1,7 @@
 // plans ctrl
 app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
   const G = $rootScope.G;
+  const User = G.clientModels.User;
   var stripe;
 
   // ---------------------------------------
@@ -61,19 +62,20 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
       billing.status = "";
     }
   });
+
   var billing = ($scope.billing = {
     visible: false,
     plan: {},
     stage: "info",
     status: "waiting",
     args: {
-      firstName: "",
-      lastName: "",
+      firstName: "Victor",
+      lastName: "Olaitan",
       address: {
-        line1: "",
+        line1: "1 millcreek court",
         line2: "",
-        city: "",
-        postal_code: "",
+        city: "ottawa",
+        postal_code: "k1s 5b7",
         country: "Canada"
       }
     },
@@ -110,6 +112,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
       billing.stage = "stripe";
     },
     checkout: tokenId => {
+      if (billing.status == "loading") return;
       billing.args.email = G.user.email;
       let billingLength =
         billing.plan.cycle == "monthly"
@@ -130,35 +133,77 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           },
           G.oauthHeader()
         )
-        .then(res => {
-          billing.status = "success";
-          $http
-            .post(
-              "http://localhost:3000/api/client/plan/provision",
-              {
-                uid: G.user._id
-              },
-              G.oauthHeader()
-            )
-            .then(res => {
-              billing.status = "";
-              billing.restartCountdown = 10;
-              let countdownTask = $interval(() => {
-                if (--billing.restartCountdown == 0) {
-                  $interval.cancel(countdownTask);
-                  G.restart();
-                }
-              }, 1000);
-            })
-            .catch(err => {
-              console.error(err);
-              billing.status = "error";
-            });
-        })
+        .then(res => onPaymentSuccess())
         .catch(err => {
+          if (err.status == 402) {
+            err.data = err.data.data;
+            if (err.data.status == "requires_payment_method") {
+              return (billing.status = "declined");
+            } else if (err.data.status == "requires_action") {
+              stripe.handleCardPayment(err.data.reattempt).then(result => {
+                if (result.error) {
+                  billing.status = "";
+                  delete err.data.reattempt;
+                  G.notifyError(
+                    "Your card was declined by your bank for invalid authentication",
+                    err
+                  );
+                } else {
+                  User.updateOne(
+                    { _id: G.user._id },
+                    {
+                      "plan.expired": false,
+                      "plan.log.purchasedDate": result.paymentIntent.created || Date.now()
+                    },
+                    err => {
+                      if (err) {
+                        return G.notifyError(
+                          [
+                            "We couldn't update your user info. ",
+                            "Please ensure you are connected to the internet while using Binder. ",
+                            "Your account will be updated soon in the cloud."
+                          ],
+                          err
+                        );
+                      }
+                      onPaymentSuccess();
+                    }
+                  );
+                }
+                $scope.$apply();
+              });
+              return;
+            }
+            delete err.data.reattempt;
+          }
           console.error(err);
           billing.status = "error";
         });
+      function onPaymentSuccess() {
+        billing.status = "success";
+        $http
+          .post(
+            `${G.API_DOMAIN}/client/plan/provision`,
+            {
+              uid: G.user._id
+            },
+            G.oauthHeader()
+          )
+          .then(res => {
+            billing.status = "";
+            billing.restartCountdown = 10;
+            let countdownTask = $interval(() => {
+              if (--billing.restartCountdown == 0) {
+                $interval.cancel(countdownTask);
+                G.restart();
+              }
+            }, 1000);
+          })
+          .catch(err => {
+            console.error(err);
+            billing.status = "error";
+          });
+      }
     }
   });
 

@@ -64,7 +64,6 @@ button i {
   padding-top: 10px;
   padding-bottom: 10px;
   flex-direction: column;
-  align-items: center;
 }
 
 #download .progress button {
@@ -72,42 +71,51 @@ button i {
   /* font-size: 18px; */
 }
 
-#download .progress .list {
-  display: flex;
-  padding-top: 5px;
-  padding-left: 10%;
-  padding-right: 10%;
-  justify-content: center;
-  align-items: center;
-}
-
-#download .progress .list .item {
+#download .progress .item {
   display: flex;
   padding: 10px;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
 }
 
-#download .progress .list .item i {
+#download .progress .item i {
   margin-bottom: 6px;
 }
 
-#download .progress .list .next {
+#download .progress .item .item-bar {
   display: flex;
-  margin-left: 15px;
-  margin-right: 15px;
+  width: 100%;
+  padding-right: 20px;
+  align-items: center;
 }
 
-#download .progress .list .next i {
-  font-size: 34px;
+#download .progress .item .item-bar .graphic {
+  display: inline-flex;
+  flex-grow: 1;
+  height: 10px;
+  margin-right: 10px;
 }
 
-#download .progress .list .next i + i {
-  margin-left: -15px;
+#download .progress .item .item-bar .graphic .used-bar {
+  background-color: #4caf50;
+}
+
+#download .progress .item .item-bar .graphic .free-bar {
+  background-color: #e9ecef;
 }
 
 #download .progress .deadline {
   margin-top: 10px;
+  margin-left: 15px;
   font-size: 12px;
+}
+
+#download .progress .done, #download .progress .waiting {
+  justify-content: center;
+}
+
+#download .progress .waiting h3 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }

@@ -46,7 +46,7 @@ html(lang="en", ng-app="app")
   body.bg-primary.color-primary
     #nav
       .head.color-secondary
-        img(src="../img/logo.png")
+        img(ng-src="../img/{{G.logoName}}.png")
         | Binder
         .navigation.color-primary
           i.material-icons(ng-click="G.stageStack.back()", ng-class="{'color-muted': !G.stageStack.canBack}") arrow_back

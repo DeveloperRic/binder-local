@@ -1,8 +1,13 @@
 const fs = require("fs");
 const ip = require("ip");
 const pathParse = require("path-parse");
+const mongoose = require("mongoose");
 
-const { isLargeFile, countPartsForLargeFile } = require("./coordination.js");
+const {
+  isLargeFile,
+  clearDir,
+  findCommonPrefix
+} = require("./coordination.js");
 const { getB2Key } = require("../security/keyManagement");
 const { decryptAndDecompress } = require("../security/storeSecure");
 const { resolveDir } = require("../prodVariables");
@@ -81,17 +86,20 @@ function init(uid, uploadPaused, uploadWaiting, uploadResume) {
             } else {
               if (progress.failed.length > 0) {
                 try {
-                  processDownload({
-                    downloadId: progress.downloadId,
-                    files: {
-                      list: progress.failed,
-                      count: progress.failed.length,
-                      totalSize: progress.failed.reduce(
-                        (acc, cur) => (acc += cur.size),
-                        0
-                      )
-                    }
-                  });
+                  processDownload(
+                    {
+                      _id: progress.downloadId,
+                      files: {
+                        list: progress.failed,
+                        count: progress.failed.length,
+                        totalSize: progress.failed.reduce(
+                          (acc, cur) => (acc += cur.size),
+                          0
+                        )
+                      }
+                    },
+                    progress.commonPrefix
+                  );
                   progress.failed.length = 0;
                 } catch (err2) {
                   return reject(err2);
@@ -168,19 +176,20 @@ function pullRemainingFiles() {
             {
               $project: {
                 _id: 1,
-                files: "$files",
+                files: "$files.list",
                 active: "$active",
                 expiresOn: "$expiresOn"
               }
             },
-            { $unwind: "$files.list" },
-            { $match: { "files.list.decryptedDate": { $exists: false } } },
+            { $unwind: "$files" },
+            { $match: { "files.decryptedDate": { $exists: false } } },
             {
               $group: {
                 _id: "$_id",
-                fileList: { $push: { idInDatabase: "$files.list" } },
-                fileCount: { $sum: 1 },
-                fileTotalSize: { $sum: "$files.list.size" },
+                fileList: { $push: { idInDatabase: "$files.idInDatabase" } },
+                fileCount: { $first: "$files.count" },
+                fileTotalSize: { $first: "$files.totalSize" },
+                fileCommonPrefix: { $first: "#files.commonPrefix" },
                 active: { $first: "$active" },
                 expiresOn: { $first: "$expiresOn" }
               }
@@ -212,8 +221,10 @@ function pullRemainingFiles() {
             delete download.fileCount;
             download.files.totalSize = download.fileTotalSize;
             delete download.fileTotalSize;
+            let commonPrefix = download.fileCommonPrefix;
+            delete download.fileCommonPrefix;
             try {
-              processDownload(download);
+              processDownload(download, commonPrefix);
             } catch (err2) {
               return reject(err2);
             }
@@ -255,9 +266,16 @@ function requestDownload(filesToDownload, releasePath) {
               },
               (err, files) => {
                 if (err) return reject(err);
-                if (files.findIndex(f => f.idInDatabase == "unset") >= 0) {
+                if (
+                  files.findIndex(
+                    f =>
+                      f.idInDatabase == "unset" || f.idInDatabase == "deleted"
+                  ) >= 0
+                ) {
                   return reject(
-                    new Error("Some files have unset database IDs")
+                    new Error(
+                      "Some files have unset database IDs / some are deleted"
+                    )
                   );
                 }
                 totalSize = files.reduce(
@@ -323,12 +341,14 @@ function requestDownload(filesToDownload, releasePath) {
             //13.1836 accounts for downlaod speed at 30Mbps
           ) *
             (60 * 60 * 1000);
+        let commonPrefix = findCommonPrefix(fileObjs);
         let downloadRequest = {
           user: userId,
           files: {
             list: fileObjs,
             count: fileObjs.length,
-            totalSize
+            totalSize,
+            commonPrefix
           },
           finishBy,
           expiresOn: finishBy + 24 * 60 * 60 * 1000,
@@ -353,7 +373,7 @@ function requestDownload(filesToDownload, releasePath) {
               clearCapturesAndPackage()
                 .then(() => {
                   try {
-                    processDownload(downloadRequest);
+                    processDownload(downloadRequest, commonPrefix);
                   } catch (err) {
                     return reject(err);
                   }
@@ -374,12 +394,12 @@ function requestDownload(filesToDownload, releasePath) {
  * Parses a downlaod object from MongoDB into the downlaod 'progress'.
  * If no progress exists, a new one is defined.
  * @param {Object} download
+ * @param {string} [commonPrefix]
  * @throws conditionally throws some errros
  */
-function processDownload(download) {
+function processDownload(download, commonPrefix) {
   if (progress && download._id != progress.downloadId) {
     if (progress.toCapture.length != 0 || progress.toDecrypt.length != 0) {
-      console.log(JSON.stringify(progress));
       throw new Error(
         "Download was rejected: There is an unfinished download in progress"
       );
@@ -421,6 +441,10 @@ function processDownload(download) {
       progress.toCapture.reduce((acc, cur) => (acc += cur.size), 0) +
       progress.toDecrypt.reduce((acc, cur) => (acc += cur.size), 0);
   }
+  progress.commonPrefix =
+    commonPrefix ||
+    findCommonPrefix(progress.toCapture.concat(progress.toDecrypt));
+  saveProgressSync(progress);
 }
 
 /**
@@ -443,7 +467,6 @@ function pause() {
     }, 1000);
   });
 }
-//TODO allow pausing/resuming captures
 
 /**
  * Warning: this promise will only reject when processing is blocked!
@@ -485,7 +508,7 @@ function resume() {
             {
               active: false,
               complete: true,
-              "log.completedDate": new Date().getTime()
+              "log.completedDate": Date.now()
             },
             err => {
               if (err) {
@@ -524,7 +547,7 @@ function resume() {
       if (!busy) {
         // check if throttling is necessary
         // 'now' is measured in seconds
-        let now = Math.floor(new Date().getTime() / 1000);
+        let now = Math.floor(Date.now() / 1000);
         if (throttler.periodStart < 0 || throttler.periodStart + 3600 < now) {
           // reset throttler if the period is over
           throttler.periodStart = now;
@@ -586,7 +609,7 @@ function resume() {
                 }
                 let failedObj =
                   action.a == "capture" ? nextCapture : nextDecrypt;
-                failedObj.failedTwice = !!failedObj.failedOnce;
+                failedObj.failedTwice = !!failedObj.failedOnce || true; //TODO should we retry?
                 failedObj.failedOnce = true;
                 if (!failedObj.failedTwice) {
                   if (action.a == "capture") {
@@ -641,13 +664,14 @@ function capture(fileDat) {
         let capturePath =
           fileDat.capturePath || `${CAPTURES_PATH}/${fileDat.id.toString()}`;
         fileDat.capturePart = capturePath;
-        let capturePromise;
-        if (isLargeFile(fileDat)) {
-          capturePromise = captureLargeFile(capturePath, fileDat);
-        } else {
-          capturePromise = captureSmallFile(capturePath, fileDat);
+        try {
+          if (fs.existsSync(capturePath)) {
+            fs.unlinkSync(capturePath);
+          }
+        } catch (err2) {
+          console.log("c| Couldn't clear existing file @ capturePath", err2);
         }
-        capturePromise
+        captureSmallFile(capturePath, fileDat)
           .then(() => {
             cleanupCapture(fileDat, capturePath)
               .then(resolve)
@@ -661,7 +685,7 @@ function capture(fileDat) {
 
 function captureSmallFile(capturePath, fileDat) {
   return new Promise((resolve, reject) => {
-    console.log("small", fileDat.idInDatabase);
+    console.log("c| capturing using small method");
     b2.downloadFileById({
       fileId: fileDat.idInDatabase,
       responseType: "stream"
@@ -680,80 +704,9 @@ function captureSmallFile(capturePath, fileDat) {
   });
 }
 
-function captureLargeFile(capturePath, fileDat) {
-  //jshint ignore:start
-  return new Promise(async (resolve, reject) => {
-    // calculate part sizes
-    console.log("large file length", fileDat.size);
-    //TODO check this with usage pricing
-    // can have at most 10,000 parts per large upload
-    // ...so same thing applies here
-    let partsCount = countPartsForLargeFile(fileDat);
-    console.log("large file partsCount", partsCount);
-    let partWidth = Math.ceil(fileDat.size / partsCount);
-    console.log("large file partWidth", partWidth);
-    let parts = [];
-    for (let i = 0; i < partsCount; i++) {
-      let partStart = i * partWidth;
-      parts.push({
-        number: i,
-        start: partStart,
-        length: Math.min(fileDat.size - partStart, partWidth)
-      });
-    }
-    let fileDescriptor;
-    try {
-      if (fs.existsSync(capturePath)) {
-        fs.unlinkSync(capturePath);
-      }
-      fileDescriptor = fs.openSync(capturePath, "a");
-    } catch (err) {
-      return reject(err);
-    }
-    let nextPart;
-    while ((nextPart = parts.shift())) {
-      try {
-        await capturePart(nextPart.number, nextPart.start, nextPart.length);
-      } catch (err) {
-        fs.closeSync(fileDescriptor);
-        return reject(err);
-      }
-    }
-    fs.closeSync(fileDescriptor);
-    resolve();
-    function capturePart(partNumber, partStart, partLength) {
-      return new Promise((resolve, reject) => {
-        console.log("part", fileDat.idInDatabase);
-        b2.downloadFileById({
-          fileId: fileDat.idInDatabase,
-          responseType: "stream",
-          Range: `bytes=${partStart}-${partLength - 1}`
-        })
-          .then(({ data }) => {
-            try {
-              data
-                .pipe(
-                  fs.createWriteStream(capturePath, {
-                    fd: fileDescriptor,
-                    flags: "a"
-                  })
-                )
-                .on("close", () => resolve())
-                .on("error", err => reject(err));
-            } catch (err) {
-              reject(err);
-            }
-          })
-          .catch(reject);
-      });
-    }
-  });
-  //jshint ignore:end
-}
-
 function cleanupCapture(fileDat, capturePath) {
   return new Promise((resolve, reject) => {
-    console.log("cleanup", fileDat.idInDatabase);
+    console.log("c| cleanup", fileDat.idInDatabase);
     b2.getFileInfo({
       fileId: fileDat.idInDatabase
     })
@@ -762,7 +715,7 @@ function cleanupCapture(fileDat, capturePath) {
         // true when the captured file size matches that
         // *IN THE B2 DATABASE*
         if (data.contentLength == fs.statSync(capturePath).size) {
-          fileDat.capturedDate = new Date().getTime();
+          fileDat.capturedDate = Date.now();
           Download.updateOne(
             { _id: progress.downloadId, "files.list.id": fileDat.id },
             {
@@ -793,13 +746,7 @@ function decrypt(fileDat) {
         // a file might be duplicated in '/captures' and '/package'
         let capturePath =
           fileDat.capturePath || `${CAPTURES_PATH}/${fileDat.id.toString()}`;
-        let decryptPromise;
-        if (isLargeFile(fileDat)) {
-          decryptPromise = decryptSmallFile(filePath, capturePath); // TODO same thing here
-        } else {
-          decryptPromise = decryptSmallFile(filePath, capturePath);
-        }
-        decryptPromise
+        decryptSmallFile(fileDat, filePath, capturePath)
           .then(() => {
             cleanupDecrypt(fileDat, capturePath, filePath)
               .then(resolve)
@@ -811,50 +758,36 @@ function decrypt(fileDat) {
   });
 }
 
-function decryptSmallFile(filePath, capturePath) {
+function decryptSmallFile(fileDat, filePath, capturePath) {
   return new Promise((resolve, reject) => {
-    decryptAndDecompress(capturePath, userId, fs.createWriteStream(filePath))
-      .then(() => resolve())
-      .catch(reject);
-  });
-}
-
-function decryptLargeFile(filePath, capturePath) {
-  return new Promise((resolve, reject) => {
-    let captureDetails = pathParse(capturePath);
-    fs.readdir(captureDetails.dir, (err, files) => {
-      if (err) return reject(err);
-      files = files.filter(f => f.startsWith(captureDetails.name));
-      if (files.length == 0) {
-        return reject(
-          new Error("Cannot decrypt file: no captured parts were found")
-        );
-      } else if (files.length == 1) {
-        return reject(
-          new Error(
-            "Cannot decrypt file: " +
-              "a large file must have >= 2 parts, and this has 1"
-          )
-        );
-      }
-      let fileStream = fs.createWriteStream(filePath);
-      //jshint ignore:start
-      files.forEach(async partName => {
-        let partPath = `${captureDetails.dir}/${partName}`;
+    File.aggregate(
+      [
+        { $match: { _id: mongoose.Types.ObjectId(fileDat.id) } },
+        { $project: { _id: 1, versions: "$versions.list" } },
+        { $unwind: "$versions" },
+        { $match: { "versions.idInDatabase": fileDat.idInDatabase } },
+        { $project: { _id: 1, initVect: "$versions.initVect" } }
+      ],
+      (err, file) => {
+        if (err) return reject(err);
+        file = file[0];
+        if (!file || !file.initVect) {
+          return reject(new Error("couldn't retrieve initVect"));
+        }
         try {
-          await new Promise((resolve, reject) => {
-            decryptAndDecompress(partPath, userId, fileStream)
-              .then(() => resolve())
-              .catch(reject);
-          });
-          fs.unlinkSync(partPath);
+          decryptAndDecompress(
+            capturePath,
+            userId,
+            Buffer.from(file.initVect, "hex"),
+            fs.createWriteStream(filePath)
+          )
+            .then(() => resolve())
+            .catch(reject);
         } catch (err2) {
           reject(err2);
         }
-      });
-      //jshint ignore:end
-      resolve();
-    });
+      }
+    );
   });
 }
 
@@ -866,14 +799,29 @@ function cleanupDecrypt(fileDat, capturePath, filePath) {
         .then(newPath => {
           fs.unlink(capturePath, err => {
             if (err) {
-              //TODO what do we do when we can't un-release the file?
-              fs.rename(newPath, filePath, err2 => {
-                if (err2) return reject([err, err2]);
-                return reject(err);
-              });
-              // ^^^^
+              // this isn't too much of a worry, it will get
+              // cleared at the end/on restart
+              console.error(
+                "Couldn't delete capture file after download\n",
+                err
+              );
             } else {
-              resolve();
+              fileDat.decryptedDate = Date.now();
+              Download.updateOne(
+                { _id: progress.downloadId, "files.list.id": fileDat.id },
+                {
+                  $set: { "files.list.$.decryptedDate": fileDat.decryptedDate }
+                },
+                (err, _done) => {
+                  if (err) {
+                    return fs.rename(newPath, filePath, err2 => {
+                      if (err2) return reject([err, err2]);
+                      return reject(err);
+                    });
+                  }
+                  resolve();
+                }
+              );
             }
           });
         })
@@ -889,7 +837,9 @@ function cleanupDecrypt(fileDat, capturePath, filePath) {
 function releaseFile(fileDat, filePath) {
   return new Promise((resolve, reject) => {
     let localPathInfo = pathParse(fileDat.localPath);
-    let localPathDir = localPathInfo.dir.replace(localPathInfo.root, "");
+    let localPathDir = localPathInfo.dir
+      .replace(progress.commonPrefix, "")
+      .replace(localPathInfo.root, "");
     while (localPathDir.charAt(0) == "/" || localPathDir.charAt(0) == "\\") {
       localPathDir = localPathDir.substr(1);
     }
@@ -962,31 +912,6 @@ function saveProgressSync(progress) {
 
 function clearCapturesAndPackage() {
   return Promise.all([clearDir(CAPTURES_PATH), clearDir(PACKAGE_PATH)]);
-}
-
-function clearDir(dir) {
-  return new Promise((resolve, reject) => {
-    if (!fs.existsSync(dir)) return resolve();
-    //jshint ignore:start
-    fs.readdir(dir, { withFileTypes: true }, async (err, files) => {
-      if (err) return reject(err);
-      for (let i in files) {
-        let dirEnt = files[i];
-        try {
-          if (dirEnt.isDirectory()) {
-            await clearDir(`${dir}/${dirEnt.name}`);
-            fs.rmdirSync(`${dir}/${dirEnt.name}`);
-          } else {
-            fs.unlinkSync(`${dir}/${dirEnt.name}`);
-          }
-        } catch (err2) {
-          return reject(err2);
-        }
-      }
-      resolve();
-    });
-    //jshint ignore:end
-  });
 }
 
 // download (capture) file > decrypt file > release file > next...

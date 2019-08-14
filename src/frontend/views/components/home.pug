@@ -52,7 +52,7 @@ block component
       p
         br
         | It seems you have not yet registered a plan for your account.
-        |  If you are not aware, Binder is an Automatic Archiving System that pushes your documents to the cloud, keeping them safe and secure.
+        |  If you are not aware, Binder is an Automatic Backup System that pushes your documents to the cloud, keeping them safe and secure.
         |  This is especially useful for sensitive projects that you want to keep protected from loss or corruption.
       h2 How this works
       br
@@ -64,20 +64,17 @@ block component
       p
         | Finally, ensure you have a stable internet connection and let Binder perform an initial backup of the folders you've selected.
         |  When this process completes, you will be able to view statistics and edit your archive in the cloud.
-    .content.container(ng-if="stage.status == '' && G.user.plan")
+    .content(ng-if="stage.status == '' && G.user.plan")
       .row.outer-row
-        .uploads.col-md-3
+        .uploads.col-md-3(ng-show="uploads.queue.length > 0")
           h2 Uploads
-          .circle-graph(ng-if="!uploads.current.parts")
-            canvas#circle-graph(width="150", height="150")
-          .parts(ng-if="uploads.current.parts")
-            .part(ng-repeat="part in uploads.current.parts")
-              | Chunk {{$index + 1}}
-              //- div(ng-prop-id="#small-circle-graph-{{$index+1}}")
-          ng-show(ng-show="uploads.current")
+          br
+          .info(ng-show="uploads.current")
             h3 {{uploads.current.filename}}
             .color-muted(ng-show="!uploads.current.isNew") Version: {{uploads.current.version}}
             .color-muted Size: {{uploads.current.size}}
+          .circle-graph
+            canvas#circle-graph(width="100", height="100")
           hr
           h3.queue-title
             span Queue 
@@ -85,7 +82,7 @@ block component
           ol
             li(ng-repeat="item in uploads.queue", ng-if="!$index == 0")
               span {{item.filename}}
-              i {{item.size}}
+              | {{item.size}}
         .col-md-9.right-col
           .space.row
             .total
@@ -102,12 +99,12 @@ block component
                   .used-bar.bar(ng-style="{{block.graphicClass}}")
                   .free-bar.bar
                 span {{(block.percentUsed).toFixed(1) > 0 ? (block.percentUsed).toFixed(1) : 0}}%
-              .block.hidden.color-muted(ng-show="space.blocks.length > 3") ... more blocks hidden
+              .block.hidden.color-muted(ng-show="space.blocks.length > 3") … more blocks hidden
           .row.plan
             .col-md-4
               h2 Billing
               p
-                code {{G.user.plan.maxTotalSize}} Gb
+                code {{plan.maxTotalSize}} Gb
               p
                 | ${{plan.price}} / 
                 code {{plan.cycle}}
