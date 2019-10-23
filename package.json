@@ -1,7 +1,7 @@
 {
   "name": "binder-local",
   "productName": "Binder",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Backup files to the cloud",
   "homepage": "https://binderapp.xyz",
   "main": "src/electron-main.js",
