@@ -10,7 +10,11 @@ autoUpdater.checkForUpdatesAndNotify();
 autoUpdater.logger = require("electron-log");
 autoUpdater.logger.transports.file.level = "info";
 
-const { DEV_MODE, resolveDir } = require("./prodVariables");
+const fs = require("fs");
+const setupPug = require("electron-pug");
+const mongoose = require("mongoose");
+
+const { DEV_MODE, resolveDir, checkAutoLauncher } = require("./prodVariables");
 const { info: logInfo, error: logError, debug: logDebug } = require("./logger");
 // console.log = (...msgs) => {
 //   if (DEV_MODE) {
@@ -34,33 +38,14 @@ const {
   hideAppWindow,
   sendMessage
 } = require("./frontend/app/app-process");
+const { load: loadLocalSettings } = require("./services/localSettings");
 const authService = require("./services/auth-service");
 const uploadService = require("./services/upload-service");
 const spiderService = require("./services/spider-service");
 const downloadService = require("./services/download-service");
 const internetService = require("./services/internet-service");
-
-const fs = require("fs");
-const setupPug = require("electron-pug");
-const mongoose = require("mongoose");
-const AutoLaunch = require("auto-launch");
-
 const User = require("./model/user");
-
-var autoLauncher = new AutoLaunch({
-  name: "Binder"
-});
-//TODO allow user to disable this
-autoLauncher.enable();
-autoLauncher
-  .isEnabled()
-  .then(isEnabled => {
-    if (isEnabled) return;
-    autoLauncher.enable();
-  })
-  .catch(err => {
-    console.error(err);
-  });
+const Plan = require("./model/plan");
 
 let initialised = false;
 
@@ -86,51 +71,71 @@ let tray;
 // Some APIs can only be used after this event occurs.
 app.on("ready", () => {
   declareTrayIcon();
+  let errorsOcurred = false;
   mongoose.set("useFindAndModify", false);
-  mongoose
-    .connect(getMongodbKey(), {
-      useNewUrlParser: true,
-      useCreateIndex: true
+  loadLocalSettings()
+    .then(({ autolaunch: { enabled: shouldEnable } }) => {
+      console.log("Local settings loaded");
+      checkAutoLauncher(shouldEnable)
+        .then(() => console.log("AutoLaunch status checked"))
+        .catch(err => {
+          console.error("Failed to check AutoLaunch status", err);
+        });
+      mongoose
+        .connect(getMongodbKey(), {
+          useNewUrlParser: true,
+          useCreateIndex: true
+        })
+        .then(() => console.log("Connected to MongoDB database"))
+        .then(startup2)
+        .catch(err => {
+          console.error("Failed to connect to database", err);
+          connectionCallback(false, true);
+          errorsOcurred = true;
+        });
     })
-    .then(() => console.log("Connected to MongoDB database"))
-    .then(() => {
-      setupPug({ pretty: true }, {})
-        .then(pug => {
-          pug.on("error", err => {}); // console.error("electron-pug error", err)
-          showWindow(() => {
-            return new Promise((resolve, reject) => {
-              declareIpcChannels();
-              getUser((user, err1) => {
-                startServices(user, err2 => {
-                  if (!err1 && !err2) {
-                    console.log("\n=[ Binder has started ]=\n");
-                  } else {
-                    //TODO somehow notify the user of these
-                    if (err1) console.error(err1);
-                    if (err2) console.error(err2);
-                    console.log("\n![ Some errors occured ]!\n");
-                  }
-                  // if (!showAppWindow()) {
-                  //   createFrontend();
-                  // }
-                  initialised = true;
-                  if (!tray) declareTrayIcon();
+    .catch(err => {
+      console.error("!!! Failed to load local settings", err);
+      errorsOcurred = true;
+    });
+  function startup2() {
+    setupPug({ pretty: true }, {})
+      .then(pug => {
+        pug.on("error", err => {}); // console.error("electron-pug error", err)
+        showWindow(() => {
+          return new Promise((resolve, reject) => {
+            declareIpcChannels();
+            getUser((user, err1) => {
+              startServices(user, err2 => {
+                if (!err1 && !err2) {
+                  console.log("\n=[ Binder has started ]=\n");
+                } else {
+                  errorsOcurred = true;
+                  if (err1) console.error(err1);
+                  if (err2) console.error(err2);
+                  console.log("\n![ Some errors occured ]!\n");
+                }
+                // if (!showAppWindow()) {
+                //   createFrontend();
+                // }
+                initialised = true;
+                if (!tray) declareTrayIcon();
+                if (!errorsOcurred) {
                   updateTrayTitle(" is running");
-                  updateTrayMenu();
-                  updateTrayIcon();
-                  createFrontend();
-                  resolve();
-                });
+                } else {
+                  updateTrayTitle(" is broken :(", false);
+                }
+                updateTrayMenu(!errorsOcurred);
+                updateTrayIcon(!errorsOcurred);
+                createFrontend();
+                resolve();
               });
             });
           });
-        })
-        .catch(err => console.error("Could not initiate 'electron-pug'", err));
-    })
-    .catch(err => {
-      console.error("Failed to connect to database", err);
-      connectionCallback(false, true);
-    });
+        });
+      })
+      .catch(err => console.error("Could not initiate 'electron-pug'", err));
+  }
 });
 
 // Quit when all windows are closed.
@@ -185,6 +190,9 @@ function onTrayClick(onlyOpen) {
 
 function onTrayCheckUpdates() {
   //TODO check for updates
+  dialog.showMessageBox(null, {
+    message: "This feature is still in development."
+  });
 }
 
 function updateTrayIcon(
@@ -334,6 +342,12 @@ function declareIpcChannels() {
   ipcMain.on("download-service", (event, arg) => {
     event.returnValue = downloadService;
   });
+  ipcMain.on("spider-check-folder", (event, path) => {
+    event.returnValue = spiderService.directoryIsSelected(path);
+  });
+  ipcMain.on("spider-check-file", (event, path) => {
+    event.returnValue = spiderService.fileIsSelected(path);
+  });
   ipcMain.on("spider-select-folder", (event, arg) => {
     if (typeof arg.path === "undefined" || typeof arg.include === "undefined") {
       throw new Error("arg must include 'path' and 'include'");
@@ -343,10 +357,20 @@ function declareIpcChannels() {
   });
   ipcMain.on("spider-select-file", (event, arg) => {
     if (typeof arg.path === "undefined" || typeof arg.include === "undefined") {
-      throw new Error("arg must include 'path' and 'include'");
+      return event.reply(
+        "spider-select-file-err",
+        new Error("arg must include 'path' and 'include'")
+      );
     }
-    spiderService.selectFile(arg.path, arg.include);
-    event.returnValue = true;
+    spiderService
+      .selectFile(arg.path, arg.include)
+      .then(() => {
+        event.reply("spider-select-file-res", true);
+      })
+      .catch(err => {
+        console.error(err);
+        event.reply("spider-select-file-err", err);
+      });
   });
   ipcMain.on("spider-directoryStore", (event, arg) => {
     spiderService
@@ -371,40 +395,46 @@ function declareIpcChannels() {
     resume: schedule => {
       console.log("==== emitting resume ====");
       sendMessage("upload-resume", schedule);
-      //TODO do this for download handlers as well
       setTimeout(() => {
         updateTrayIcon(undefined, true);
         updateTrayMenu(undefined, true);
-      }, 3000);
+      }, 2000);
+    },
+    pause: () => {
+      sendMessage("upload-paused");
+      setTimeout(() => {
+        updateTrayIcon();
+        updateTrayMenu();
+      }, 2000);
     },
     progress: (fileDat, partNumber) => {
       sendMessage("upload-progress", fileDat, partNumber);
     },
     success: fileDat => {
-      console.log("==== emitting success ====");
+      console.log("==== upload success ====");
       sendMessage("upload-success", fileDat);
     },
     failed: fileDat => {
-      console.log("==== emitting failed ====");
+      console.log("==== upload failed ====");
       sendMessage("upload-failed", fileDat);
     },
     allUploaded: schedule => {
       console.log("\nUpload [all done]\n");
-      console.log("==== emitting all-done ====");
-      sendMessage("upload-all-uploaded", schedule);
+      console.log("==== upload all-done ====");
+      sendMessage("upload-all-done", schedule);
       setTimeout(() => {
         updateTrayIcon();
         updateTrayMenu();
-      }, 3000);
+      }, 2000);
     },
     allFailed: schedule => {
       console.log("\nUpload [all failed!]\n");
-      console.log("==== emitting all-failed ====");
+      console.log("==== upload all-failed ====");
       sendMessage("upload-all-failed", schedule);
       setTimeout(() => {
         updateTrayIcon();
         updateTrayMenu();
-      }, 3000);
+      }, 2000);
     }
   });
   //
@@ -414,154 +444,182 @@ function declareIpcChannels() {
     downloadService
       .requestDownload(...args)
       .then(downloadId => {
-        event.reply("download-request-res", downloadId);
-        console.log(downloadId);
+        sendMessage("download-request-res", downloadId);
+        console.log("downloadId=" + downloadId);
       })
       .catch(err => {
-        event.reply("download-request-err", err);
+        sendMessage("download-request-err", err);
+        console.log(err);
+      });
+  });
+  ipcMain.on("download-cancel", () => {
+    downloadService
+      .cancelDownload()
+      .then(() => {
+        sendMessage("download-cancel-res");
+      })
+      .catch(err => {
+        sendMessage("download-cancel-err", err);
         console.log(err);
       });
   });
   ipcMain.on("download-event-handlers", (event, arg) => {
     downloadService.setDownloadHandlers(arg);
   });
-  // ipcMain.on("download-status", (event, arg) => {
-  //   sendMessage("download-resume", uploadService.getCurrentSchedule());
-  //   event.returnValue = uploadService.getCurrentSchedule();
-  // });
-  // downloadService.setDownloadHandlers({
-  //   resume: schedule => {
-  //     // console.log("==== emitting resume ====");
-  //     sendMessage("upload-resume", schedule);
-  //     updateTrayIcon(undefined, undefined, true);
-  //     updateTrayMenu(undefined, undefined, true);
-  //   },
-  //   captured: (fileDat, partNumber) => {
-  //     sendMessage("upload-progress", fileDat, partNumber);
-  //   },
-  //   released: fileDat => {
-  //     // console.log("==== emitting success ====");
-  //     sendMessage("upload-success", fileDat);
-  //   },
-  //   failed: fileDat => {
-  //     // console.log("==== emitting failed ====");
-  //     sendMessage("upload-failed", fileDat);
-  //   },
-  //   allUploaded: schedule => {
-  //     // console.log("==== emitting all-done ====");
-  //     sendMessage("upload-all-uploaded", schedule);
-  //     updateTrayIcon();
-  //     updateTrayMenu();
-  //   },
-  //   allFailed: schedule => {
-  //     // console.log("==== emitting all-failed ====");
-  //     sendMessage("upload-all-failed", schedule);
-  //     updateTrayIcon();
-  //     updateTrayMenu();
-  //   }
-  // });
-  //
+  ipcMain.on("download-status", (event, arg) => {
+    sendMessage("download-resume", uploadService.getCurrentSchedule());
+    event.returnValue = uploadService.getCurrentSchedule();
+  });
+  downloadService.setDownloadHandlers({
+    resume: progress => {
+      console.log("==== download resume ====");
+      sendMessage("download-resume", progress);
+      setTimeout(() => {
+        updateTrayIcon(undefined, undefined, true);
+        updateTrayMenu(undefined, undefined, true);
+      }, 3000);
+    },
+    paused: () => {
+      sendMessage("download-paused");
+      setTimeout(() => {
+        updateTrayIcon();
+        updateTrayMenu();
+      }, 3000);
+    },
+    captured: fileDat => {
+      sendMessage("download-captured", fileDat);
+    },
+    decrypted: fileDat => {
+      console.log("==== download success ====");
+      sendMessage("download-success", fileDat);
+    },
+    failed: fileDat => {
+      console.log("==== download failed ====");
+      sendMessage("download-failed", fileDat);
+    },
+    allDownloaded: progress => {
+      console.log("==== download all-done ====");
+      sendMessage("download-all-done", progress);
+      setTimeout(() => {
+        updateTrayIcon();
+        updateTrayMenu();
+      }, 3000);
+    },
+    allFailed: progress => {
+      console.log("==== download all-failed ====");
+      sendMessage("download-all-failed", progress);
+      setTimeout(() => {
+        updateTrayIcon();
+        updateTrayMenu();
+      }, 3000);
+    }
+  });
+
   console.log("Declared ipc channels");
 }
 
 function getUser(next) {
   let profile = authService.getProfile();
-  User.findOne(
-    { email: profile.email },
-    { _id: 1, "plan.expired": 1, "plan.blocks": 1 },
-    (err, user) => {
-      if (err) return next(null, err);
-      if (user) {
+  User.findOne({ email: profile.email }, { _id: 1, plan: 1 }, (err, user) => {
+    if (err) return next(null, err);
+    if (user) {
+      console.log("Got user");
+      next(user);
+    } else {
+      user = {
+        email: profile.email,
+        email_verified: profile.email_verified,
+        profile: {
+          nickname: profile.nickname,
+          picture: profile.picture
+        }
+      };
+      User.create(appendSecurityKey(user), (err, _user) => {
+        if (err) return next(null, err);
         console.log("Got user");
+        user._id = _user._id;
         next(user);
-      } else {
-        user = {
-          email: profile.email,
-          email_verified: profile.email_verified,
-          profile: {
-            nickname: profile.nickname,
-            picture: profile.picture
-          }
-        };
-        User.create(appendSecurityKey(user), (err, _user) => {
-          if (err) return next(null, err);
-          console.log("Got user");
-          user._id = _user._id;
-          next(user);
-        });
-      }
+      });
     }
-  ).lean(true);
+  }).lean(true);
 }
 
-function startServices({ _id: uid, plan }, next) {
-  fs.mkdirSync(resolveDir("data"), { recursive: true });
-  if (plan && plan.expired) {
-    console.log("User's plan has expired, upload+spider services not started");
-    return next();
-  }
-  //ObjectId validator regex /^[a-fA-F0-9]{24}$/
-  uploadService
-    .init(
-      uid,
-      downloadService.isPaused,
-      downloadService.isWaiting,
-      downloadService.resume
-    )
-    .then(() => {
-      console.log("Upload service started");
-      downloadService
+function startServices({ _id: uid, plan: planId }, next) {
+  Plan.findById(planId, { expired: 1 })
+    .then(plan => {
+      fs.mkdirSync(resolveDir("data"), { recursive: true });
+      if (!plan || plan.expired) {
+        console.log(
+          "User's plan has expired, upload, download & spider services not started"
+        );
+        return next();
+      }
+      //ObjectId validator regex /^[a-fA-F0-9]{24}$/
+      uploadService
         .init(
           uid,
-          uploadService.isPaused,
-          uploadService.isWaiting,
-          uploadService.resume
+          plan._id,
+          downloadService.isPaused,
+          downloadService.isWaiting,
+          downloadService.resume
         )
         .then(() => {
-          console.log("Download service started");
-          //-----------------------------
-          uploadService
-            .pause()
-            .finally(() => console.log("Upload service resuming"))
-            .then(uploadService.resume)
-            .catch(err => {
-              console.error(
-                "\n",
-                "Upload service blocked the resume. Possible plan expiry\n",
-                err,
-                "\n"
-              );
-            });
-          //-----------------------------
-          console.log("Download service resuming soon..");
-          setImmediate(() => {
-            downloadService
-              .pause()
-              .finally(() => console.log("Download service resuming"))
-              .then(downloadService.resume)
-              .catch(err => {
-                console.error(
-                  "\n",
-                  "Download service blocked the resume. Upload-service might be busy\n",
-                  err,
-                  "\n"
-                );
-              });
-          });
-          //-----------------------------
-          spiderService
-            .startSpider(uid, uploadService)
+          console.log("Upload service started");
+          downloadService
+            .init(
+              uid,
+              plan._id,
+              uploadService.isPaused,
+              uploadService.isWaiting,
+              uploadService.resume
+            )
             .then(() => {
-              console.log("Spider started successfully");
-              internetService.start(connectionCallback);
-              console.log("Internet-service started");
-              next();
+              console.log("Download service started");
+              //-----------------------------
+              uploadService
+                .pause()
+                .finally(() => console.log("Upload service resuming"))
+                .then(uploadService.resume)
+                .catch(err => {
+                  console.error(
+                    "\n",
+                    "Upload service blocked the resume. Possible plan expiry\n",
+                    err,
+                    "\n"
+                  );
+                });
+              //-----------------------------
+              console.log("Download service resuming soon..");
+              setImmediate(() => {
+                downloadService
+                  .pause()
+                  .finally(() => console.log("Download service resuming"))
+                  .then(downloadService.resume)
+                  .catch(err => {
+                    console.error(
+                      "\n",
+                      "Download service blocked the resume. Upload-service might be busy\n",
+                      err,
+                      "\n"
+                    );
+                  });
+              });
+              //-----------------------------
+              spiderService
+                .startSpider(uid, uploadService)
+                .then(() => {
+                  console.log("Spider started successfully");
+                  internetService.start(connectionCallback);
+                  console.log("Internet-service started");
+                  next();
+                })
+                .catch(err => next(err));
             })
+            // nothing is allowed to go wrong here!
             .catch(err => next(err));
         })
         // nothing is allowed to go wrong here!
         .catch(err => next(err));
     })
-    // nothing is allowed to go wrong here!
     .catch(err => next(err));
 }

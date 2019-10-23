@@ -23,7 +23,8 @@ function startSpider(uid, uploadService) {
     } else {
       Spider({
         uid,
-        taskDelay: 60 * 1000,
+        firstDelay: 60 * 1000, // wait 1 min first
+        taskDelay: 5 * 60 * 1000, // every 5 mins
         uploadService
       })
         .then(s => {
@@ -52,12 +53,20 @@ function readOnlyDirectoryStore() {
   });
 }
 
+function directoryIsSelected(path) {
+  return spider.directoryIsSelected(path);
+}
+
+function fileIsSelected(path) {
+  return spider.fileIsSelected(path);
+}
+
 function selectDirectory(path, include) {
-  let startAtEnd = true;
+  let startAtEnd = false;
   if (spider.isRunning()) {
     spider.cancelTask();
     spider.wasCancelled = true;
-    startAtEnd = false;
+    startAtEnd = true;
   }
   spider.selectDirectory(path, include, true);
   let searchDirectory = path => {
@@ -74,26 +83,29 @@ function selectDirectory(path, include) {
   searchDirectory(path);
   spider.saveDirectoryStore();
   if (startAtEnd) {
-    spider.startTask();
+    spider.startTask(true);
   }
 }
 
 function selectFile(path, include) {
-  let startAtEnd = true;
+  let startAtEnd = false;
   if (spider.isRunning()) {
     spider.cancelTask();
     spider.wasCancelled = true;
-    startAtEnd = false;
+    startAtEnd = true;
   }
-  spider.selectFile(path, include);
+  let p = spider.selectFile(path, include);
   if (startAtEnd) {
-    spider.startTask();
+    spider.startTask(true);
   }
+  return p;
 }
 
 module.exports = {
   startSpider,
   readOnlyDirectoryStore,
+  directoryIsSelected,
+  fileIsSelected,
   selectDirectory,
   selectFile
 };

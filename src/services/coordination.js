@@ -14,6 +14,22 @@
 */
 
 const fs = require("fs");
+const mongoose = require("mongoose");
+
+/**
+ * @returns {Promise<mongoose.ClientSession>}
+ */
+function beginSession() {
+  return new Promise((resolve, reject) => {
+    mongoose
+      .startSession()
+      .then(session => {
+        session.startTransaction();
+        resolve(session);
+      })
+      .catch(reject);
+  });
+}
 
 /**
  * Given a fileDat obj, returns true if the file is considered large,
@@ -43,7 +59,7 @@ function countPartsForLargeFile(fileDat) {
 /**
  * Will recursively empty out all files and directories
  * within the specified path
- * @param {string} path 
+ * @param {string} path
  */
 function clearDir(path) {
   return new Promise((resolve, reject) => {
@@ -70,7 +86,7 @@ function clearDir(path) {
 
 /**
  * Finds the common localPath prefix between a set of files
- * @param {Array<{localPath: string}>} files 
+ * @param {Array<{localPath: string}>} files
  */
 function findCommonPrefix(files) {
   if (files.length == 0) return "";
@@ -84,16 +100,13 @@ function findCommonPrefix(files) {
   );
   let commonPrefix = "";
   while (nextPrefix) {
-    if (
-      files.findIndex(f => !f.localPath.startsWith(nextPrefix)) >= 0
-    ) {
+    if (files.findIndex(f => !f.localPath.startsWith(nextPrefix)) >= 0) {
       break;
     }
     commonPrefix = nextPrefix;
     nextPrefix += files[0].localPath.substr(
       nextPrefix.length,
-      files[0].localPath.indexOf("/", nextPrefix.length + 1) -
-        nextPrefix.length
+      files[0].localPath.indexOf("/", nextPrefix.length + 1) - nextPrefix.length
     );
     if (nextPrefix == oldNextPrefix) break;
     oldNextPrefix = nextPrefix;
@@ -101,14 +114,40 @@ function findCommonPrefix(files) {
   return commonPrefix;
 }
 
+/**
+ * Replaces all backslashes in `path` with forward-slashes
+ * @param {string} path 
+ */
 function normalisePath(path) {
-  return path.replace(new RegExp(G.regexEscape("\\"), "g"), "/");
+  return path.replace(new RegExp(regexEscape("\\"), "g"), "/");
+}
+
+/**
+ * Escapes all special RegExp characters from the string
+ * @param {string} s 
+ */
+function regexEscape(s) {
+  if (!RegExp.escape) {
+    RegExp.escape = s => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+  }
+  return RegExp.escape(s);
+}
+
+/**
+ * Converts the given string to a mongoose ObjectId
+ * @param {string} s 
+ */
+function toObjectId(s) {
+  return mongoose.Types.ObjectId(s.toString());
 }
 
 module.exports = {
+  beginSession,
   isLargeFile,
   countPartsForLargeFile,
   clearDir,
   findCommonPrefix,
-  normalisePath
+  normalisePath,
+  regexEscape,
+  toObjectId
 };

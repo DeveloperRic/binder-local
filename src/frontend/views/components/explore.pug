@@ -31,6 +31,10 @@ block component
           | If this error persits, try restarting the app.
           br
           | For more help, contact support.
+        .status-box.empty.w3-animate-opacity(ng-show="source.current.folders.length == 0 && source.current.files.length == 0")
+          .left-justify
+            img(ng-src="../img/empty-list.png")
+            | Nothing to show
         .item.folder.w3-animate-opacity(ng-show="source.status == ''", ng-repeat="folder in source.current.folders", ng-click="source.enter(folder.explorePath)", context-menu='folder.contextMenu')
           .name
             i.material-icons folder
@@ -40,7 +44,7 @@ block component
             span.size {{folder.sized}}
             i.material-icons(context-menu='folder.contextMenu', context-menu-on="click") more_horiz
         .item.file.w3-animate-opacity(ng-show="source.status == ''", ng-repeat="file in source.current.files", ng-click="source.select(file)", context-menu='file.contextMenu', ng-class="{'bg-accent-light': source.selected.includes(file.localPath)}")
-          .name
+          .name(ng-class="{'color-red': file.pendingDeletion}")
             i.material-icons insert_drive_file
             span.text {{file.name}}
           .more

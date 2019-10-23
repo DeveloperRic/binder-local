@@ -1,0 +1,36 @@
+#settings {
+  padding: 30px;
+}
+
+#settings h2 {
+  display: flex;
+  align-items: center;
+  margin-top: 20px;
+  margin-bottom: 25px;
+}
+
+#settings h2 i {
+  margin-right: 10px;
+  font-size: 28px;
+}
+
+#settings h3 {
+  margin-top: 20px;
+}
+
+#settings hr {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+#settings form, #settings table {
+  max-width: 72%;
+}
+#settings h4 + .input {
+  max-width: 65%;
+}
+
+#settings .content {
+  display: flex;
+  flex-direction: column;
+}

@@ -2,12 +2,14 @@ const fs = require("fs");
 const pathParse = require("path-parse");
 const ip = require("ip");
 const { PROD_DEV_MODE, resolveDir } = require("../prodVariables");
+const { normalisePath } = require("./coordination");
 
 var File = require("../model/file");
 var uploadService;
 
 let uid;
 var directoryStore;
+let firstDelay;
 let taskDelay;
 let process;
 let processing = false;
@@ -16,7 +18,7 @@ let initialised = false;
 
 /**
  * Initialises the spider
- * @param {{uid: "ObjectId", taskDelay: Number}} options
+ * @param {Object<string, any>} options
  * @throws an error if already initialised
  */
 function init(options) {
@@ -25,8 +27,14 @@ function init(options) {
       return reject(new Error("Spider already initialised"));
     }
     setImmediate(() => {
-      checkOptions(options, ["uid", "taskDelay", "uploadService"]);
-      uid = options.uid;
+      checkOptions(options, [
+        "uid",
+        "firstDelay",
+        "taskDelay",
+        "uploadService"
+      ]);
+      uid = options.uid.toString();
+      firstDelay = options.firstDelay;
       taskDelay = options.taskDelay;
       uploadService = options.uploadService;
       // pull the directory store if it did not already
@@ -38,7 +46,14 @@ function init(options) {
           .catch(reject);
       } else {
         readDirectoryStore();
-        finialiseInit();
+        if (directoryStore.uid != uid) {
+          directoryStore = resetDirectoryStore();
+          pullDirectoryStore()
+            .then(finialiseInit)
+            .catch(reject);
+        } else {
+          finialiseInit();
+        }
       }
       function finialiseInit() {
         resolve({
@@ -51,6 +66,8 @@ function init(options) {
             return Object.assign({}, directoryStore);
           },
           pullDirectoryStore,
+          directoryIsSelected,
+          fileIsSelected,
           selectDirectory,
           selectFile,
           saveDirectoryStore
@@ -60,34 +77,22 @@ function init(options) {
   });
 }
 
-function startTask() {
-  checkOptions({ uid }, ["uid"]);
-  return new Promise((resolve, reject) => {
-    // clear running process
-    // NOTE: upload processes may still be running!
-    if (process) clearInterval(process);
-    // check upload-service is initialised
-    if (!uploadService.isInitialised()) {
-      return reject("upload-service not initialised");
-    } else {
-      // start spider process
-      process = setInterval(task, taskDelay);
-      resolve();
-    }
-  });
+function directoryIsSelected(path) {
+  return !!directoryStore.active.find(d => d.path == normalisePath(path));
 }
 
-function cancelTask() {
-  if (!process) {
-    process = clearInterval(process);
-  }
-  // prevent spawning of a new process
-  // (this is more of a fail-safe)
-  wasCancelled = false;
+function fileIsSelected(path) {
+  path = normalisePath(path);
+  let dirPath = pathParse(path).dir;
+  let dir = directoryStore.active.find(d => d.path == dirPath);
+  if (!dir) return false;
+  let file = dir.files.find(f => f.path == path);
+  return !!file && !file.ignored;
 }
 
 function selectDirectory(path, include, doNotSave) {
   checkOptions({ path, include }, ["path", "include"]);
+  path = normalisePath(path);
   if (!fs.existsSync(path) && include) {
     throw new Error("path doesn't exist");
   }
@@ -106,55 +111,128 @@ function selectDirectory(path, include, doNotSave) {
     }
   } else if (directoryIndex >= 0) {
     // if you want to ignore and a match was found
-    // remove the match
-    directoryStore.active.splice(directoryIndex, 1);
+    // move the match to ignored
+    let directory = directoryStore.active.splice(directoryIndex, 1);
+    // set an ignored date for future complete removal
+    directory.ignoredOn = Date.now();
   }
   if (!doNotSave) saveDirectoryStore();
 }
 
 function selectFile(path, include) {
-  checkOptions({ path, include }, ["path", "include"]);
-  if (!fs.existsSync(path) && include) {
-    throw new Error("path doesn't exist");
-  }
-  // load the current directory store
-  if (!directoryStore) readDirectoryStore();
-  let directoryIndex = directoryStore.active.findIndex(
-    d => d.path == pathParse(path).dir
-  );
-  if (include) {
-    let file = {
-      path: path,
-      mtimeMs: fs.statSync(path).mtimeMs, // is corrected below
-      ignore: false,
-      detected: Date.now()
-    };
-    // if you want to include and the corresponding folder
-    // was not found, insert one (including the new file)
-    if (directoryIndex < 0) {
-      directoryStore.active.push({
-        path: path,
-        files: [file]
-      });
-    } else if (
-      !directoryStore.active[directoryIndex].files.find(f => f.path == path)
-    ) {
-      // if the corresponding folder was found and a matching file
-      // was not found, insert the new file
-      directoryStore.active[directoryIndex].files.push(file);
+  return new Promise(async (resolve, reject) => {
+    try {
+      checkOptions({ path, include }, ["path", "include"]);
+      path = normalisePath(path);
+      if (!fs.existsSync(path) && include) {
+        throw new Error("path doesn't exist");
+      }
+      // load the current directory store
+      if (!directoryStore) readDirectoryStore();
+      let dirPath = pathParse(path).dir;
+      let directoryIndex = directoryStore.active.findIndex(
+        d => d.path == dirPath
+      );
+      if (include) {
+        let file = {
+          path: path,
+          mtimeMs: fs.statSync(path).mtimeMs, // is corrected below
+          ignored: false,
+          detected: Date.now()
+        };
+        // if you want to include and the corresponding folder
+        // was not found, insert one (including the new file)
+        if (directoryIndex < 0) {
+          directoryStore.active.push({
+            path: path,
+            files: [file]
+          });
+        } else {
+          let storedFileIndex = directoryStore.active[
+            directoryIndex
+          ].files.findIndex(f => f.path == path);
+          if (storedFileIndex < 0) {
+            // if the corresponding folder was found and a matching file
+            // was not found, insert the new file
+            directoryStore.active[directoryIndex].files.push(file);
+          } else {
+            await File.updateOne(
+              {
+                owner: uid,
+                localPath:
+                  directoryStore.active[directoryIndex].files[storedFileIndex]
+                    .path
+              },
+              { ignored: false }
+            ).then();
+            directoryStore.active[directoryIndex].files[
+              storedFileIndex
+            ].ignored = false;
+          }
+        }
+      } else if (directoryIndex >= 0) {
+        // only continues if you want to ignore and the
+        // corresponding folder was found
+        let fileIndex = directoryStore.active[directoryIndex].files.findIndex(
+          f => f.path == path
+        );
+        if (fileIndex >= 0) {
+          // if a matching file was found, ignore it
+          await File.updateOne(
+            {
+              owner: uid,
+              localPath:
+                directoryStore.active[directoryIndex].files[fileIndex]
+                  .path
+            },
+            { ignored: true }
+          ).then();
+          directoryStore.active[directoryIndex].files[fileIndex].ignored = true;
+        }
+      }
+      saveDirectoryStore();
+      resolve();
+    } catch (err) {
+      reject(err);
     }
-  } else if (directoryIndex >= 0) {
-    // only continues if you want to ignore and the
-    // corresponding folder was found
-    let file = directoryStore.active[directoryIndex].files.find(
-      f => f.path == path
-    );
-    if (file) {
-      // if a matching file was found, ignore it
-      file.ignore = true;
+  });
+}
+
+function startTask(skipFirstDelay) {
+  checkOptions({ uid }, ["uid"]);
+  return new Promise((resolve, reject) => {
+    // clear running process
+    // NOTE: upload processes may still be running!
+    cancelTask();
+    // check upload-service is initialised
+    if (!uploadService.isInitialised()) {
+      return reject("upload-service not initialised");
+    } else {
+      // start spider process
+      setTimeout(
+        () => {
+          if (!skipFirstDelay) {
+            // run first task
+            setImmediate(task);
+          }
+          process = setInterval(task, taskDelay);
+        },
+        skipFirstDelay ? 0 : firstDelay
+      );
+      console.log("Spider was started");
+      resolve();
     }
+  });
+}
+
+function cancelTask() {
+  if (process) {
+    process = clearInterval(process);
+    console.log("Spider was stopped");
   }
-  saveDirectoryStore();
+  // prevent spawning of a new process
+  // (this is more of a fail-safe)
+  wasCancelled = false;
 }
 
 function task() {
@@ -171,19 +249,19 @@ function task() {
   // console.log(" - spider processing");
   let changed = [];
   let removed = [];
-  let now = new Date();
+  let now = Date.now();
   // ignore non-existant directories
   directoryStore.active = directoryStore.active.filter(directory => {
     if (!fs.existsSync(directory.path)) {
       // set an ignored date for future complete removal
-      directory.ignoredOn = now.getTime();
+      directory.ignoredOn = now;
       directoryStore.ignore.push(directory);
       return false;
     } else return true;
   });
   // re-activate ignored directories that re-appear within a week
   const WEEK_MILLS = 6048000000;
-  directoryStore.ignore.filter(directory => {
+  directoryStore.ignore = directoryStore.ignore.filter(directory => {
     if (fs.existsSync(directory.path)) {
       // clear ignored date for the found directory
       delete directory.ignoredOn;
@@ -191,8 +269,7 @@ function task() {
       return false;
     } else if (now > directory.ignoredOn + WEEK_MILLS) {
       // completely remove directories that have been
-      // removed for over a week
-      // TODO notify user of this
+      // ignored for over a week
       return false;
     } else return true;
   });
@@ -204,8 +281,7 @@ function task() {
       const ent = files[i];
       // skip non-'file' files
       if (!ent.isFile()) continue;
-      let slash = directory.path.includes("\\") ? "\\" : "/";
-      const filePath = `${directory.path}${slash}${ent.name}`;
+      const filePath = `${directory.path}/${ent.name}`;
       let stat = fs.statSync(filePath);
       let storedDat = directory.files.find(v => v.path == filePath);
       // if no stored info on this file, push a new one
@@ -214,14 +290,14 @@ function task() {
           (storedDat = {
             path: filePath,
             mtimeMs: 0, // is corrected below
-            ignore: false,
+            ignored: false,
             detected: Date.now()
           })
         );
       }
       // skip if file is ignored
       // (absolutely won't skip if file's new)
-      if (storedDat.ignore) continue;
+      if (storedDat.ignored) continue;
       // if (stat.mtimeMs > storedDat.mtimeMs) {
       // ^ This has been removed to ensure changes are always checked with the backend
 
@@ -248,8 +324,7 @@ function task() {
     directory.files.forEach(file => {
       if (
         !files.find(ent => {
-          let slash = directory.path.includes("\\") ? "\\" : "/";
-          return `${directory.path}${slash}${ent.name}` == file.path;
+          return `${directory.path}/${ent.name}` == file.path;
         })
       ) {
         // declare a removed file
@@ -297,7 +372,7 @@ function task() {
       if (err) {
         console.error(err);
         if (err.processingBlocked) {
-          // TODO add a service that will notify when the spider cannot continue
+          // NOTE add a service that will notify when the spider cannot continue
           // NOTE spider will stop forever if processing
           // was blocked. Client will need to restart it
           // (usually after plan renewal)
@@ -323,39 +398,36 @@ function pullDirectoryStore() {
   checkOptions({ uid }, ["uid"]);
   return new Promise((resolve, reject) => {
     setImmediate(() => {
-      let filesToBin = [];
+      let sentResponse = false;
       File.find(
         { owner: uid },
         {
           localPath: 1,
+          ignored: 1,
           binned: 1,
           "log.detected": 1,
           "log.lastModifiedTime": 1
-        },
-        (err, files) => {
-          if (err) return reject(err);
-          for (let i in files) {
-            const file = files[i];
-            const path = pathParse(file.localPath);
+        }
+      )
+        .cursor()
+        .on("error", err => reject(err))
+        .on("data", file => {
+          try {
+            const path = normalisePath(pathParse(file.localPath));
             if (!fs.existsSync(file.localPath)) {
               if (!file.binned) {
-                // minimise internet usage by performing
-                // bulk updates
-                filesToBin.push(file.localPath);
+                processBinned(file.localPath);
+                file.binned = true;
               }
-              continue;
-            }
-            // Typically, if a file exists, then its directory
-            // exists. Sometimes this is not true, so we must check
-            if (!fs.existsSync(path.dir)) continue;
-            // only pull directories that aren't being ignored
-            if (directoryStore.ignore.find(d => d.path == path.dir)) {
-              continue;
             }
             let dir;
             // search for directory in store, pushing
-            // a new entry if not found
-            if (!(dir = directoryStore.active.find(d => d.path == path.dir))) {
+            // a new (active) entry if not found
+            if (
+              !(dir =
+                directoryStore.ignore.find(d => d.path == path.dir) ||
+                directoryStore.active.find(d => d.path == path.dir))
+            ) {
               dir = {
                 path: path.dir,
                 files: []
@@ -371,40 +443,40 @@ function pullDirectoryStore() {
               // in the (dir) object, so updates will persist
               dir.files.push(storedFile);
             }
+            storedFile.ignored = !!file.ignored;
             storedFile.mtimeMs = file.log.lastModifiedTime;
-            storedFile.ignore = file.binned;
             storedFile.detected = file.log.detected;
+          } catch (err) {
+            sentResponse = true;
+            reject(err);
           }
+        })
+        .on("end", () => {
+          if (sentResponse) return;
           saveDirectoryStore();
-          processBinned();
-        }
-      );
-      function processBinned() {
-        if (filesToBin.length > 0) {
-          // select files that haven't been binned and bin them
-          File.updateMany(
-            { owner: uid, localPath: { $in: filesToBin }, binned: false },
-            {
-              binned: true,
-              log: {
-                $push: {
-                  binnedHistory: {
-                    date: new Date(),
-                    ipAddress: ip.address("public", "ipv6"),
-                    reason:
-                      "pullUpdate() process detected this file no longer exists in user's file-system"
-                  }
-                }
+          resolve();
+        });
+      function processBinned(fileToBin) {
+        // bin the file if it isn't already (it shouldn't be)
+        File.updateOne(
+          { owner: uid, localPath: fileToBin, binned: false },
+          {
+            binned: true,
+            $push: {
+              "log.binnedHistory.list": {
+                date: new Date(),
+                ipAddress:
+                  ip.address("public", "ipv6") || ip.address("public", "ipv4"),
+                reason:
+                  "local spider process detected this file (or its folder) no longer exists in user's file-system"
               }
             },
-            (err, _done) => {
-              if (err) return reject(err);
-              resolve();
+            $inc: {
+              "log.binnedHistory.count": 1
             }
-          );
-        } else {
-          resolve();
-        }
+          },
+          err => console.error("Couldn't bin a file\n", err)
+        );
       }
     });
   });
@@ -419,10 +491,11 @@ function checkOptions(obj, required) {
 }
 
 function saveDirectoryStore(onlyIfNew) {
-  // only save directories if no schema exists
+  // only save directories if it doesn't already exist
   if (onlyIfNew && !!directoryStore) return;
   if (onlyIfNew && fs.existsSync(resolveDir("data/directories.json"))) return;
   let toSave = directoryStore || {
+    uid,
     active: [],
     ignore: []
   };
@@ -436,6 +509,12 @@ function readDirectoryStore() {
   directoryStore = JSON.parse(
     fs.readFileSync(resolveDir("data/directories.json"))
   );
+}
+
+function resetDirectoryStore() {
+  directoryStore = null;
+  fs.unlinkSync(resolveDir("data/directories.json"));
+  return saveDirectoryStore(true);
 }
 
 module.exports = init;

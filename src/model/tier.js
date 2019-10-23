@@ -48,6 +48,14 @@ var tierSchema = mongoose.Schema({
   fileVersioningAllowed: {
     type: Boolean,
     default: false
+  },
+  lifecycleRules: {
+    deleteAfter: {
+      type: Number,
+      min: 1,
+      set: v => Math.floor(v),
+      default: 30
+    }
   }
 }, {id: false});
 

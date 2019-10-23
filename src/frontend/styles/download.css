@@ -2,8 +2,6 @@ button i {
   margin-right: 5px;
 }
 
-/* TODO empty list graphic for all lists in the electron app */
-
 #download {
   padding: 30px;
 }
@@ -110,7 +108,8 @@ button i {
   font-size: 12px;
 }
 
-#download .progress .done, #download .progress .waiting {
+#download .progress .done,
+#download .progress .waiting {
   justify-content: center;
 }
 

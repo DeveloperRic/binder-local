@@ -25,6 +25,7 @@ html(lang="en", ng-app="app")
     link(href='../styles/help.css', rel='stylesheet')
     link(href='../styles/download.css', rel='stylesheet')
     link(href='../styles/explore.css', rel='stylesheet')
+    link(href='../styles/settings.css', rel='stylesheet')
     block styles
     //- script(src="../scripts/jquery-3.4.1.min.js")
     script(src='../scripts/angular/angular.min.js')
@@ -42,6 +43,7 @@ html(lang="en", ng-app="app")
     script(src='../scripts/controller/help.js')
     script(src='../scripts/controller/download.js')
     script(src='../scripts/controller/explore.js')
+    script(src='../scripts/controller/settings.js')
 
   body.bg-primary.color-primary
     #nav
@@ -67,14 +69,17 @@ html(lang="en", ng-app="app")
           | Stats
         a(ng-click="G.switchStage('download')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('download')}")
           i.material-icons file_download
-          | Download ( α )
+          | Download
         a(ng-click="G.switchStage('help')", ng-class="{'color-accent': G.stageStack.current().startsWith('help')}")
           i.material-icons help_outline
           | Help
-        a(ng-click="G.switchStage('plans')", ng-class="{'color-accent': G.stageStack.current().startsWith('plans')}")
+        a(ng-click="G.switchStage('plans')", ng-if="!G.user.plan_expired", ng-class="{'color-accent': G.stageStack.current().startsWith('plans')}")
           i.material-icons dns
           | Plans
-        a(ng-click="G.logout()", ng-class="{'color-accent': G.stageStack.current().startsWith('settings')}")
+        a(ng-click="G.switchStage('renew')", ng-if="G.user.plan_expired", ng-class="{'color-accent': G.stageStack.current().startsWith('renew')}")
+          i.material-icons autorenew
+          | Renew plan
+        a(ng-click="G.switchStage('settings')", ng-class="{'color-accent': G.stageStack.current().startsWith('settings')}")
           i.material-icons settings
           | Settings
     .stages.bg-secondary-light
@@ -117,3 +122,18 @@ html(lang="en", ng-app="app")
         .dismiss.bg-primary
           button.color-red(ng-click="G.choose.cancel()") Cancel
           button(ng-if="G.choose.selections.length > 0", ng-click="G.choose.finish()", ng-class="{'w3-animate-opacity': true}") Finish
+    #infoPopup.popup(class="display:none", ng-if="G.infoPopup.visible", ng-class="{'display:flex': true}")
+      .body
+        .info-popup.bg-primary.drop-shadow-strong(ng-class="{'w3-animate-top': zoom}")
+          .header(ng-if="G.infoPopup.allowDismiss")
+            button(ng-click="G.infoPopup.close(false)")
+              i.material-icons close
+              | Close
+          .text.color-primary
+            p
+              ng-repeat(ng-repeat="line in G.infoPopup.msg")
+                | {{line}}
+                br(ng-show="!$last")
+        .dismiss.bg-primary(ng-if="!G.infoPopup.allowDismiss && !G.infoPopup.delayConfirm", ng-class="{'w3-animate-opacity': true}")
+          button.color-red(ng-click="G.infoPopup.close(false)") Cancel
+          button(ng-click="G.infoPopup.close(true)") Confirm

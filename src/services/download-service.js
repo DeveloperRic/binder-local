@@ -3,18 +3,14 @@ const ip = require("ip");
 const pathParse = require("path-parse");
 const mongoose = require("mongoose");
 
-const {
-  isLargeFile,
-  clearDir,
-  findCommonPrefix
-} = require("./coordination.js");
+const { clearDir, findCommonPrefix, toObjectId } = require("./coordination.js");
 const { getB2Key } = require("../security/keyManagement");
 const { decryptAndDecompress } = require("../security/storeSecure");
 const { resolveDir } = require("../prodVariables");
 
 const b2 = new (require("backblaze-b2"))(getB2Key());
 
-const User = require("../model/user");
+const Plan = require("../model/plan");
 const Tier = require("../model/tier");
 const Download = require("../model/download");
 const File = require("../model/file");
@@ -37,6 +33,7 @@ let isUploadsWaiting;
 let uploadsResume;
 let downloadHandlers = {
   resume: null,
+  paused: null,
   captured: null,
   decrypted: null,
   failed: null,
@@ -53,9 +50,12 @@ let throttler = {
  * setting state variables, and verifing user's plan status.
  * NOTE: Will reject the promise only if an error occurs or the user's status could not be verified.
  * @param {"ObjectId"} uid
+ * @param {"ObjectId"} planId
  * @param {function} uploadPaused
+ * @param {function} uploadWaiting
+ * @param {function} uploadResume
  */
-function init(uid, uploadPaused, uploadWaiting, uploadResume) {
+function init(uid, planId, uploadPaused, uploadWaiting, uploadResume) {
   return new Promise((resolve, reject) => {
     userId = uid.toString();
     isUploadsPaused = uploadPaused;
@@ -78,7 +78,7 @@ function init(uid, uploadPaused, uploadWaiting, uploadResume) {
               }
               return clearCapturesAndPackage()
                 .then(() => {
-                  finaliseInit()
+                  finaliseInit(planId)
                     .then(resolve)
                     .catch(reject);
                 })
@@ -107,7 +107,7 @@ function init(uid, uploadPaused, uploadWaiting, uploadResume) {
               }
               return pullRemainingFiles()
                 .then(() => {
-                  finaliseInit()
+                  finaliseInit(planId)
                     .then(resolve)
                     .catch(reject);
                 })
@@ -118,7 +118,7 @@ function init(uid, uploadPaused, uploadWaiting, uploadResume) {
       } else {
         clearCapturesAndPackage()
           .then(() => {
-            finaliseInit()
+            finaliseInit(planId)
               .then(resolve)
               .catch(reject);
           })
@@ -128,36 +128,27 @@ function init(uid, uploadPaused, uploadWaiting, uploadResume) {
   });
 }
 
-function finaliseInit() {
+function finaliseInit(planId) {
   return new Promise((resolve, reject) => {
-    User.findById(
-      userId,
-      { "plan.expired": 1, "plan.tier": 1 },
-      (err, user) => {
-        if (err) return reject(err);
-        if (!user) return reject(new Error("User not found"));
-        if (!user.plan) {
-          return reject(new Error("User doesn't have a plan"));
-        } else if (user.plan.expired) {
-          return reject(new Error("User's plan has expired"));
-        }
-        Tier.findOne(
-          { id: user.plan.tier },
-          { retrieveSpeed: 1 },
-          (err, tier) => {
-            if (err) return reject(err);
-            if (!tier) return reject(new Error("Failed to load Tier data"));
-            userTier = tier;
-            b2.authorize()
-              .then(() => {
-                initialised = true;
-                resolve();
-              })
-              .catch(reject);
-          }
+    Plan.findById(planId, { expired: 1, tier: 1 }, (err, plan) => {
+      if (err) return reject(err);
+      if (!plan || plan.expired) {
+        return reject(
+          new Error("User doesn't have a plan / user's plan has expired")
         );
       }
-    );
+      Tier.findById(plan.tier, { retrieveSpeed: 1 }, (err, tier) => {
+        if (err) return reject(err);
+        if (!tier) return reject(new Error("Failed to load Tier data"));
+        userTier = tier;
+        b2.authorize()
+          .then(() => {
+            initialised = true;
+            resolve();
+          })
+          .catch(reject);
+      });
+    });
   });
 }
 
@@ -178,6 +169,7 @@ function pullRemainingFiles() {
                 _id: 1,
                 files: "$files.list",
                 active: "$active",
+                finishBy: "$finishBy",
                 expiresOn: "$expiresOn"
               }
             },
@@ -191,6 +183,7 @@ function pullRemainingFiles() {
                 fileTotalSize: { $first: "$files.totalSize" },
                 fileCommonPrefix: { $first: "#files.commonPrefix" },
                 active: { $first: "$active" },
+                finishBy: { $first: "$finishBy" },
                 expiresOn: { $first: "$expiresOn" }
               }
             }
@@ -423,6 +416,7 @@ function processDownload(download, commonPrefix) {
       filesLeft: download.files.count,
       bytesLeft: download.files.totalSize,
       releasePath: download.releasePath,
+      finishBy: download.finishBy,
       failed: []
     };
   } else {
@@ -463,6 +457,9 @@ function pause() {
       if (!busy) {
         clearInterval(task);
         resolve();
+        if (downloadHandlers.paused) {
+          downloadHandlers.paused();
+        }
       }
     }, 1000);
   });
@@ -500,8 +497,8 @@ function resume() {
         clearInterval(task);
         if (progress.failed.length == 0) {
           console.log("download [all completed]!");
-          if (downloadHandlers.alldownloaded) {
-            downloadHandlers.alldownloaded(progress);
+          if (downloadHandlers.allDownloaded) {
+            downloadHandlers.allDownloaded(progress);
           }
           Download.updateOne(
             { _id: progress.downloadId },
@@ -534,8 +531,11 @@ function resume() {
             }
           );
         } else {
-          console.log("download [some failed]!");
+          console.log("download [all failed]!");
           paused = true;
+          if (downloadHandlers.allFailed) {
+            downloadHandlers.allFailed(progress);
+          }
         }
         // verify the user's plan hasn't epired
         // if it has block future processing
@@ -589,6 +589,9 @@ function resume() {
                   console.log("capture successful");
                   // increment throttler after the successful capture
                   throttler.periodGbs += nextCapture.size / 1073741824;
+                  if (downloadHandlers.captured) {
+                    downloadHandlers.captured(progress);
+                  }
                 } else {
                   nextDecrypt.decrypted = true;
                   //remove successful downloads from progress
@@ -596,6 +599,9 @@ function resume() {
                   progress.filesLeft--;
                   progress.bytesLeft -= nextDecrypt.size;
                   console.log("decrypt successful");
+                  if (downloadHandlers.decrypted) {
+                    downloadHandlers.decrypted(progress);
+                  }
                 }
               })
               .catch(err => {
@@ -609,7 +615,7 @@ function resume() {
                 }
                 let failedObj =
                   action.a == "capture" ? nextCapture : nextDecrypt;
-                failedObj.failedTwice = !!failedObj.failedOnce || true; //TODO should we retry?
+                failedObj.failedTwice = !!failedObj.failedOnce || true; //NOTE should we retry?
                 failedObj.failedOnce = true;
                 if (!failedObj.failedTwice) {
                   if (action.a == "capture") {
@@ -652,6 +658,22 @@ function resume() {
         console.log("resume was blocked!\n", err);
       });
     }
+  });
+}
+
+function cancelDownload() {
+  return new Promise((resolve, reject) => {
+    pause()
+      .then(() => {
+        clearProgress()
+          .then(() => {
+            clearCapturesAndPackage()
+              .then(() => resolve())
+              .catch(reject);
+          })
+          .catch(reject);
+      })
+      .catch(reject);
   });
 }
 
@@ -741,7 +763,7 @@ function decrypt(fileDat) {
       let filePath = `${PACKAGE_PATH}/${fileDat.nameInDatabase}`;
       fs.mkdir(pathParse(filePath).dir, { recursive: true }, err => {
         if (err) return reject(err);
-        //TODO let user know how much space is required for download
+        //NOTE let user know how much space is required for download
         // cuz we are decrypting THEN deleting so at any given point
         // a file might be duplicated in '/captures' and '/package'
         let capturePath =
@@ -762,7 +784,7 @@ function decryptSmallFile(fileDat, filePath, capturePath) {
   return new Promise((resolve, reject) => {
     File.aggregate(
       [
-        { $match: { _id: mongoose.Types.ObjectId(fileDat.id) } },
+        { $match: { _id: toObjectId(fileDat.id) } },
         { $project: { _id: 1, versions: "$versions.list" } },
         { $unwind: "$versions" },
         { $match: { "versions.idInDatabase": fileDat.idInDatabase } },
@@ -805,24 +827,23 @@ function cleanupDecrypt(fileDat, capturePath, filePath) {
                 "Couldn't delete capture file after download\n",
                 err
               );
-            } else {
-              fileDat.decryptedDate = Date.now();
-              Download.updateOne(
-                { _id: progress.downloadId, "files.list.id": fileDat.id },
-                {
-                  $set: { "files.list.$.decryptedDate": fileDat.decryptedDate }
-                },
-                (err, _done) => {
-                  if (err) {
-                    return fs.rename(newPath, filePath, err2 => {
-                      if (err2) return reject([err, err2]);
-                      return reject(err);
-                    });
-                  }
-                  resolve();
-                }
-              );
             }
+            fileDat.decryptedDate = Date.now();
+            Download.updateOne(
+              { _id: progress.downloadId, "files.list.id": fileDat.id },
+              {
+                $set: { "files.list.$.decryptedDate": fileDat.decryptedDate }
+              },
+              (err, _done) => {
+                if (err) {
+                  return fs.rename(newPath, filePath, err2 => {
+                    if (err2) return reject([err, err2]);
+                    return reject(err);
+                  });
+                }
+                resolve();
+              }
+            );
           });
         })
         .catch(reject);
@@ -843,9 +864,7 @@ function releaseFile(fileDat, filePath) {
     while (localPathDir.charAt(0) == "/" || localPathDir.charAt(0) == "\\") {
       localPathDir = localPathDir.substr(1);
     }
-    let newPath = `${progress.releasePath}/${localPathDir}/${
-      localPathInfo.base
-    }`;
+    let newPath = `${progress.releasePath}/${localPathDir}/${localPathInfo.base}`;
     fs.mkdir(pathParse(newPath).dir, { recursive: true }, err => {
       if (err) return reject(err);
       fs.rename(filePath, newPath, err => {
@@ -864,18 +883,18 @@ function releaseFile(fileDat, filePath) {
  */
 function verifyPlanNotExpired() {
   return new Promise((resolve, reject) => {
-    User.findOne({ _id: userId }, { "plan.expired": 1 }, (err, user) => {
+    Plan.findOne({ owner: userId, expired: false }, { _id: 1 }, (err, plan) => {
       if (err) {
         allowProcessing = false;
         return reject(err);
       }
-      if (!user) {
+      if (!plan) {
         allowProcessing = false;
         return reject(
           new Error("invalid initialisation of userId (user not found)")
         );
       }
-      if (!user.plan || user.plan.expired) {
+      if (!plan) {
         allowProcessing = false;
         return reject();
       } else {
@@ -885,6 +904,10 @@ function verifyPlanNotExpired() {
   });
 }
 
+/**
+ * Attaches download handlers. Will replace any old handlers
+ * @param {Object<string, function>} handlers
+ */
 function setDownloadHandlers(handlers) {
   for (let key in handlers) {
     if (downloadHandlers.hasOwnProperty(key)) {
@@ -910,6 +933,18 @@ function saveProgressSync(progress) {
   fs.writeFileSync(PROGRESS_PATH, JSON.stringify(progress));
 }
 
+function clearProgress() {
+  return new Promise((resolve, reject) => {
+    if (fs.existsSync(PROGRESS_PATH)) {
+      fs.unlink(PROGRESS_PATH, err => {
+        if (err) return reject(err);
+        progress = null;
+        resolve();
+      });
+    } else resolve();
+  });
+}
+
 function clearCapturesAndPackage() {
   return Promise.all([clearDir(CAPTURES_PATH), clearDir(PACKAGE_PATH)]);
 }
@@ -925,5 +960,6 @@ module.exports = {
   isWaiting: () => waiting,
   setDownloadHandlers,
   getProgress: () => progress,
-  requestDownload
+  requestDownload,
+  cancelDownload
 };

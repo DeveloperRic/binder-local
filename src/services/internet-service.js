@@ -7,7 +7,7 @@ let process;
 
 function start(callback) {
   stop();
-  process = setInterval(task, 20000, callback);
+  process = setInterval(task, 60000, callback);
 }
 
 function task(callback) {

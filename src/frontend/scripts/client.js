@@ -12,19 +12,30 @@ WHERE CONSTANTS, STATE_VARS AND COMMONLY-USED FUNCTIONS
 WILL BE HELD.
 */
 
-app.run(function($rootScope, $cookies) {
-  const { remote, ipcRenderer } = require("electron");
+app.run(function($rootScope, $cookies, $interval) {
+  const { remote, ipcRenderer, shell } = require("electron");
   const { getAccessToken, getProfile } = remoteRequire("services/auth-service");
   const { createLogoutWindow } = remoteRequire("frontend/app/auth-process");
+  const { regexEscape, toObjectId, beginSession } = remoteRequire(
+    "services/coordination"
+  );
   const { clientModels, relaunch, getViewComponentUrl } = remoteRequire(
     "frontend/app/app-process"
   );
-  const { DEV_MODE, API_DOMAIN } = remoteRequire("prodVariables");
-  var User = clientModels.User;
-  var stageStack = [];
-  var stageStackIndex = -1;
+  const {
+    DEV_MODE,
+    API_DOMAIN,
+    LOCAL_SETTINGS_PATH,
+    resolveDir
+  } = remoteRequire("prodVariables");
+  const User = clientModels.User;
+  const Plan = clientModels.Plan;
+  const stageStack = [];
+  let stageStackIndex = -1;
   const G = ($rootScope.G = {
     remote,
+    ipcRenderer,
+    shell,
     lang: {},
     setLang,
     saveUid,
@@ -35,6 +46,8 @@ app.run(function($rootScope, $cookies) {
     oauthHeader,
     require: remoteRequire,
     API_DOMAIN,
+    LOCAL_SETTINGS_PATH,
+    resolveDir,
     stripePublishableKey: "pk_test_fX7mdGyHoDRM5jd28IL6nmzF00pXMoMcT9",
     getUser,
     user: {},
@@ -65,20 +78,22 @@ app.run(function($rootScope, $cookies) {
       msg: null,
       visible: false
     },
+    infoPopup: {
+      msg: [],
+      visible: false,
+      delayTask: null
+    },
     notifyError,
     notifyChoose,
-    clientModels: clientModels,
-    ipcRenderer,
+    notifyLoading,
+    notifyInfo,
+    clientModels,
     regexEscape,
+    toObjectId,
+    beginSession,
     dateToTime,
     refreshCtrl: () => {}
   });
-  function regexEscape(s) {
-    if (!RegExp.escape) {
-      RegExp.escape = s => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-    }
-    return RegExp.escape(s);
-  }
   function switchStage(stage, ...args) {
     if (stageStackIndex >= 0 && stageStack[stageStackIndex].id == stage) {
       return;
@@ -100,6 +115,7 @@ app.run(function($rootScope, $cookies) {
       G.stageStack.src = stageStack[--stageStackIndex].src;
       G.stageStack.canBack = stageStackIndex > 0;
       G.stageStack.canForward = stageStackIndex < stageStack.length - 1;
+      G.stageStack.switchArgs = {};
     }
   }
   function stageForward() {
@@ -107,6 +123,39 @@ app.run(function($rootScope, $cookies) {
       G.stageStack.src = stageStack[++stageStackIndex].src;
       G.stageStack.canBack = stageStackIndex > 0;
       G.stageStack.canForward = stageStackIndex < stageStack.length - 1;
+      G.stageStack.switchArgs = {};
+    }
+  }
+  function notifyLoading(popupVisible, popupMsg) {
+    G.loadingPopup.visible = popupVisible;
+    G.loadingPopup.msg = popupMsg;
+  }
+  function notifyInfo(popupMsg, allowDismiss = true, onClose, delayConfirm) {
+    G.infoPopup.visible = !!popupMsg;
+    if (popupMsg == null) {
+      G.infoPopup.msg = [];
+    } else if (typeof popupMsg == "string") {
+      G.infoPopup.msg = [popupMsg];
+    } else {
+      G.infoPopup.msg = popupMsg;
+    }
+    $interval.cancel(G.infoPopup.delayTask);
+    delete G.infoPopup.delayConfirm;
+    if (G.infoPopup.msg.length > 0) {
+      G.infoPopup.allowDismiss = allowDismiss;
+      G.infoPopup.close = confirmed => {
+        G.infoPopup.visible = false;
+        console.log(confirmed);
+        if (onClose) onClose(confirmed);
+      };
+      if (delayConfirm) {
+        G.infoPopup.delayConfirm = true;
+        G.infoPopup.delayTask = $interval(
+          () => delete G.infoPopup.delayConfirm,
+          Math.min(5000, 1000 * G.infoPopup.msg.length),
+          1
+        );
+      }
     }
   }
   function notifyChoose(options, data, onChoose) {
@@ -174,38 +223,63 @@ app.run(function($rootScope, $cookies) {
       email: 1,
       email_verified: 1
     };
+    let planProjection = {};
+    let hasExcludedPlan = false;
     projections.forEach(proj => {
-      projection[proj] = 1;
+      let exclude = proj.startsWith("-");
+      if (exclude) proj = proj.substr(1);
+      if (proj.startsWith("plan.")) {
+        hasExcludedPlan = hasExcludedPlan || exclude;
+        planProjection[proj.substr(5)] = exclude ? 0 : 1;
+      } else {
+        projection[proj] = exclude ? 0 : 1;
+      }
     });
-    if (!projection.plan) {
-      projection["plan.expired"] = 1;
+    projection.plan = 1;
+    if (!hasExcludedPlan) {
+      planProjection.expired = 1;
     }
     User.findOne({ email: G.profile.email }, projection, (err, user) => {
       if (err) return callback(err);
       if (!user) {
         return callback(new Error("Logged in user not found in MongoDB"));
       }
-      if (!user.email_verified || (user.plan && user.plan.expired)) {
-        // TODO what happens when a user's plan expires?
+      if (!user.email_verified) {
         user.plan = null;
       }
-      callback(false, user);
+      user._id = user._id.toString();
+      if (user.plan) {
+        Plan.findOne(
+          { _id: user.plan, expired: false },
+          planProjection,
+          (err, plan) => {
+            if (err) return callback(err);
+            user.plan = plan;
+            if (!plan) {
+              user.plan_expired = true;
+            }
+            callback(false, user);
+          }
+        );
+      } else {
+        callback(false, user);
+      }
     }).lean(true);
   }
-  function logout(callback) {
+  function logout(callback, verify) {
     setImmediate(() => {
-      if (!callback) {
-        if (
-          !confirm(
-            "Are you sure you want to logout?\nYes, I am aware, this isn't settings lol"
-          )
-        ) {
-          return;
-        }
-        callback = () => G.restart();
+      if (verify || !callback) {
+        G.notifyInfo("Are you sure you want to logout?", false, confirmed => {
+          if (!confirmed) return;
+          if (!callback) {
+            callback = () => G.restart();
+          }
+          createLogoutWindow().then(callback);
+        });
+        $rootScope.$apply();
+      } else {
+        createLogoutWindow().then(callback);
       }
-      createLogoutWindow().then(callback);
-      // .then(() => remote.getCurrentWindow().close());
     });
   }
   function remoteRequire(module) {
@@ -317,5 +391,5 @@ app.run(function($rootScope, $cookies) {
     "Saturday",
     "Sunday"
   ];
-  G.switchStage(DEV_MODE ? "plans" : "home");
+  G.switchStage(DEV_MODE ? "home" : "home");
 });

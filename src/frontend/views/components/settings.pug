@@ -1,0 +1,218 @@
+extends layout
+block component
+  #settings.stage(ng-controller="settingsCtrl")
+    .status-box.loading(ng-if="stage.status == 'loading'")
+      | !{horzSpinner}
+      h3 Fetching your info
+    .status-box.error(ng-if="stage.status == 'error'")
+      i.material-icons error_outline
+      h3 Something went wrong
+      p
+      | If this error persits, try restarting the app.
+      br
+      | For more help, contact support.
+    .content.container(ng-if="stage.status == ''")
+      h2
+        i.material-icons.color-accent tune
+        |  Device Settings
+      div
+        h3 Refresh Dashboard
+        p
+          | This might fix some low-level bugs.
+        button.border-accent.color-accent(ng-click="refreshFrontend()")
+          bold Refresh
+      br
+      div
+        h3 Autolaunch
+        ng-show(ng-show="autolaunch.status == 'loading'")
+          | !{smallCircleSpinner}
+        ng-show(ng-show="autolaunch.status==''")
+          p
+            span(ng-show="autolaunch.enabled")
+              | Binder is set to automatically launch on system start.
+            span(ng-show="!autolaunch.enabled")
+              | Binder is 
+              bold NOT
+              |  set to automatically launch on system start.
+          button.border-accent.color-accent(ng-click="autolaunch.toggle()")
+            bold {{autolaunch.enabled ? 'Disable Autolaunch' : 'Enable Autolaunch'}}
+        ng-show(ng-show="autolaunch.status=='updating'")
+          | !{smallCircleSpinner}
+      br
+      div
+        h3 Logout of Binder
+        p
+          | Binder will wait for the current upload/download (if any) to settle before logging you out.
+        button.border-accent.color-accent(ng-click="G.logout()")
+          bold Logout
+      br
+      br
+      h2
+        i.material-icons.color-accent account_circle
+        |  Profile Settings
+      h3 Email address
+      p
+        | Your email address is used for authentication and communication purposes. 
+        | It is important that you keep your email address up to date in Binder so that 
+        | we can keep your account secure and so that you don't miss critical alerts.
+      h4.color-muted WHAT WE HAVE
+      br
+      p.bg-secondary {{email.oldEmailAddress}}
+      h4.color-muted UPDATE YOUR EMAIL ADDRESS
+      br
+      form(ng-submit="email.submitUpdate()")
+        table
+          tr(ng-if="!!email.error")
+            td(colspan="2")
+              h3.error {{email.error}}
+          tr
+            td(colspan="2")
+              .input
+                input(type='email', ng-model='email.newEmailAddress', required, placeholder='New email address', ng-disabled="email.status=='updating'")
+                .label-floor
+          tr
+            td
+              br
+              button.bg-accent.color-inverse(type="submit", ng-disabled="email.status=='updating'") Submit
+            td
+              span(ng-show="email.status=='updating'")
+                | !{smallCircleSpinner}
+              span(ng-show="email.status=='success'")
+                | Email updated!
+      br
+      h3 Full name
+      p
+        | We need to know what your legal name is in order to facilitate payments 
+        | and keep our records of your data accurate.
+      h4.color-muted WHAT WE HAVE
+      table
+        tr
+          td Firstname
+          td Lastname
+        tr
+          td
+            .input.bg-secondary
+              input.bg-secondary(type='text', ng-model='name.old.firstName', readonly)
+          td
+            .input.bg-secondary
+              input.bg-secondary(type='text', ng-model='name.old.lastName', readonly)
+      br
+      h4.color-muted UPDATE YOUR NAME
+      br
+      form(ng-submit="name.submitUpdate()")
+        table
+          tr(ng-if="!!name.error")
+            td(colspan="2")
+              h3.error {{name.error}}
+          tr
+            td Firstname
+            td Lastname
+          tr
+            td
+              .input
+                input(type='text', ng-model='name.new.firstName', placeholder='Updated Firstname', required, ng-disabled="name.status=='updating'")
+                .label-floor
+            td
+              .input
+                input(type='text', ng-model='name.new.lastName', placeholder='Updated Lastname', required, ng-disabled="name.status=='updating'")
+                .label-floor
+          tr
+            td
+              br
+              button.bg-accent.color-inverse(type="submit", ng-disabled="name.status=='updating'") Submit
+            td
+              span(ng-show="name.status=='updating'")
+                | !{smallCircleSpinner}
+              span(ng-show="name.status=='success'")
+                | Name updated!
+      br
+      h3 Billing Address
+      p
+        | Your billing address is required for payment verification and (sometimes) invoice delivery. 
+        | Please keep your billing address up to date to ensure your payments can be verified.
+      h4.color-muted WHAT WE HAVE
+      br
+      p.bg-secondary
+        span(ng-repeat="line in address.oldAddress", ng-show="line")
+          | {{line}}
+          br(ng-if="!$last")
+      h4.color-muted UPDATE BILLING ADDRESS
+      br
+      form(ng-submit="address.submitUpdate()")
+        table
+          tr(ng-if="!!address.error")
+            td(colspan="2")
+              h3.error {{address.error.msg}}
+          tr
+            td(colspan="2")
+              .input
+                input(type='text', ng-model='address.new.line1', required, placeholder='Address line 1', ng-disabled="address.status=='updating'")
+                .label-floor
+          tr
+            td.address2(colspan="2")
+              .input
+                input(type='text', ng-model='address.new.line2', placeholder='Address line 2', ng-disabled="address.status=='updating'")
+                .label-floor
+              code.color-muted optional
+          tr
+            td
+              .input
+                input(type='text', ng-model='address.new.city', required, placeholder='City', ng-disabled="address.status=='updating'")
+                .label-floor
+            td
+              .input
+                input(type='text', ng-model='address.new.postal_code', required, placeholder='Postal code', ng-class="{'border-color:red': address.error.cause=='postal-code'}", ng-disabled="address.status=='updating'")
+                .label-floor
+          tr
+            td
+              .input.country.bg-secondary(title="Binder is only available in Canada right now.")
+                input.bg-secondary(type='text', ng-model='address.new.country', required, placeholder='Country', readonly, ng-disabled="address.status=='updating'")
+                .label-floor
+          tr
+            td
+              br
+              button.bg-accent.color-inverse(type="submit", ng-disabled="address.status=='updating'") Submit
+            td
+              span(ng-show="address.status=='updating'")
+                | !{smallCircleSpinner}
+              span(ng-show="address.status=='success'")
+                | Address updated!
+      br
+      ng-show(ng-show="G.user.plan")
+        br
+        h2
+          i.material-icons.color-accent account_balance_wallet
+          |  Plan Settings
+        .danger
+          h3.color-red Cancel your plan
+          p(ng-show="plan.cancel.cycle=='monthly'")
+            | We will reimburse the remainder of your purchase if you cancel before the 15th day of the month. 
+            | Otherwise, your commitment will be assumed, and you will not be reimbursed.
+          p(ng-show="plan.cancel.cycle=='quaterly'")
+            | We will reimburse the remainder of your purchase if you cancel before the 1st day of the 2nd month of your current cycle. 
+            | Otherwise, your commitment will be assumed, and you will not be reimbursed.
+          p(ng-show="plan.cancel.cycle=='annually'")
+            | We will reimburse the remainder of your purchase if you cancel before the 1st day of the 6th month of your current cycle. 
+            | Otherwise, your commitment will be assumed, and you will not be reimbursed.
+          p(ng-show="plan.cancel.cycle=='unknown'")
+            | We will reimburse the remainder of your purchase if you cancel before you reach 50% of your cycle. 
+            | Otherwise, your commitment will be assumed, and you will not be reimbursed.
+          button.border-red.color-red(ng-click="plan.cancel.submit()")
+            bold Cancel my plan
+        br
+        .danger
+          h3.color-red Reset your data
+          p
+            | Use this button if you would like us to wipe your files and all data associated with it. 
+            | Your data will be removed within 24 hours of you submitting this request
+          button.border-red.color-red(ng-click="plan.reset.submit()")
+            bold Reset my data
+      br
+      .danger
+        h3.color-red Delete account
+        p
+          | Use this button to completely erase your profile, files, and all data associated with your account. 
+          | We're very sorry if you're unsatisfied with Binder and hope you will consider us again. 
+          | If you would instead like to submitt a complaint, you can do so from the help page.
+        button.border-red.color-red(ng-click="plan.delete.submit()")
+          bold Delete my account

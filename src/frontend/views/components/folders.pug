@@ -24,7 +24,8 @@ block component
             | Last update was {{updates.formattedLastUpdate}}
       br
       p
-        | Open the file explorer to perform specific actions on files.
+        span.color-red ALPHA
+        |  Open the file explorer to perform specific actions on files.
         br
         | e.g.) deletions and roll-backs
         br
@@ -56,6 +57,10 @@ block component
           .remove
             button.color-accent(ng-disabled="!folders.addFolderPath || folders.addStatus=='adding'", ng-click="folders.finishAdd()") Backup folder
         //---------- folder list
+        .status-box.empty.w3-animate-opacity(ng-show="folders.list.length == 0")
+          .left-justify
+            img(ng-src="../img/empty-list.png")
+            | Nothing to show
         .folder.w3-animate-opacity(ng-repeat="folder in folders.list", ng-show="$index < 12 || folders.showAll")
           .main
             .expand
@@ -88,8 +93,12 @@ block component
           | {{folders.showAll? 'Show less' : 'Show more (' + (folders.list.length - 12) + ')'}}
       br
       .history
-        h2 History
+        h2 Recent History
         br
+        .status-box.empty.w3-animate-opacity(ng-show="history.list.length == 0")
+          .left-justify
+            img(ng-src="../img/empty-list.png")
+            | Nothing to show
         .history-item.w3-animate-opacity(ng-repeat="item in history.list")
           .info
             span.date.color-muted {{item.formattedDate}}

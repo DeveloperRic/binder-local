@@ -33,78 +33,85 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
         },
         mainBlockId => {
           if (!mainBlockId) return;
-          if (
-            !confirm(
-              "Are you sure you want to do this? Merging blocks is a permanent operation, and can only be reversed (automatically) if a significant performance decrease is detected."
-            )
-          ) {
-            return;
-          }
-          mainBlockId = mainBlockId.id;
-          G.loadingPopup.visible = true;
-          $http
-            .post(
-              `${G.API_DOMAIN}/client/plan/mergeBlocks`,
-              {
-                subBlock: subBlockId,
-                mainBlock: mainBlockId,
-                ipAddress:
-                  ip.address("public", "ipv6") || ip.address("public", "ipv4")
-              },
-              G.oauthHeader()
-            )
-            .finally(() => (G.loadingPopup.visible = false))
-            .then(() => {
-              spaceRefresh()
-                .then(() => $scope.$apply())
-                .catch(info => {
-                  G.notifyError(
-                    [
-                      "Your blocks were merged.",
-                      "But the request failed when refreshing the list.",
-                      "Please reopen the 'My Binder' page."
-                    ],
-                    info[1]
-                  );
-                });
-            })
-            .catch(err => G.notifyError("Failed to merge blocks", err));
+          G.notifyInfo(
+            "Are you sure you want to do this? Merging blocks is a permanent operation, and can only be reversed if a significant performance decrease is detected.",
+            false,
+            confirmed => {
+              if (!confirmed) return;
+              mainBlockId = mainBlockId.id;
+              G.notifyLoading(true);
+              $http
+                .post(
+                  `${G.API_DOMAIN}/client/plan/mergeBlocks`,
+                  {
+                    subBlock: subBlockId,
+                    mainBlock: mainBlockId,
+                    ipAddress:
+                      ip.address("public", "ipv6") ||
+                      ip.address("public", "ipv4")
+                  },
+                  G.oauthHeader()
+                )
+                .finally(() => G.notifyLoading(false))
+                .then(() => {
+                  spaceRefresh()
+                    .then(() => $scope.$apply())
+                    .catch(info => {
+                      G.notifyError(
+                        [
+                          "Your blocks were merged.",
+                          "But the request failed when refreshing the list.",
+                          "Please reopen the 'My Binder' page."
+                        ],
+                        info[1]
+                      );
+                    });
+                })
+                .catch(err => G.notifyError("Failed to merge blocks", err));
+            },
+            true
+          );
         }
       );
     }
   });
 
   var plan = ($scope.plan = {
-    status: "waiting"
+    status: "waiting",
+    invoiceHistory: []
   });
 
   // ---------------------------------------
 
   stage.status = "loading";
 
-  G.getUser((err, user) => {
-    if (err || !user) {
-      stage.status = "error";
-      G.notifyError("We couldn't get your user info", err);
-      return $scope.$apply();
-    }
-    G.user = JSON.parse(JSON.stringify(user));
-    if (!user.plan) {
-      stage.status = "error";
-      G.notifyError("Cannot show info without a plan");
-    } else {
-      Promise.all([spaceRefresh(), planRefresh()])
-        .then(() => $scope.$apply(() => (stage.status = "")))
-        .catch(args =>
-          $scope.$apply(() => {
-            console.log(args);
-            stage.status = "error";
-            G.notifyError(args[0], args[1]);
-          })
-        );
-    }
-    $scope.$apply();
-  }, "plan", "stripe_customer_id");
+  G.getUser(
+    (err, user) => {
+      if (err || !user) {
+        stage.status = "error";
+        G.notifyError("We couldn't get your user info", err);
+        return $scope.$apply();
+      }
+      G.user = JSON.parse(JSON.stringify(user));
+      if (!user.plan) {
+        stage.status = "error";
+        G.notifyError("Cannot show info without a plan");
+      } else {
+        Promise.all([spaceRefresh(), planRefresh()])
+          .then(() => $scope.$apply(() => (stage.status = "")))
+          .catch(args =>
+            $scope.$apply(() => {
+              console.log(args);
+              stage.status = "error";
+              G.notifyError(args[0], args[1]);
+            })
+          );
+      }
+      $scope.$apply();
+    },
+    "stripe_customer_id",
+    "-plan.periods"
+  );
 
   function spaceRefresh() {
     return new Promise((resolve, reject) => {
@@ -138,9 +145,11 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
                   html: contextMenuHTML("live_help", "What's this?"),
                   displayed: Boolean(block.mergedInto),
                   click: () =>
-                    alert(
-                      "This block has been marked as 'merged' into another block.\nWhich means that new files set to go into this block will no longer be stored here, but instead in the block's parent block.\nFor more help, check the Help page."
-                    )
+                    G.notifyInfo([
+                      "This block has been marked as 'merged' into another block.",
+                      "Which means that new files set to go into this block will no longer be stored here, but instead in the block's parent block.",
+                      "For more help, check the Help page."
+                    ])
                 }
               ]
             };
@@ -199,7 +208,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
 
   function planRefresh() {
     return new Promise((resolve, reject) => {
-      Tier.findOne({ id: G.user.plan.tier }, { name: 1 }, (err, tier) => {
+      Tier.findById(G.user.plan.tier, { name: 1 }, (err, tier) => {
         if (err || !tier) {
           plan.status = "error";
           return reject([
@@ -232,37 +241,30 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
           ${G.longMonths[date.getMonth()]} ${date.getFullYear()}`;
         };
         let periodEnd = new Date(G.user.plan.currentPeriodStart);
-        periodEnd.setFullYear(
-          periodEnd.getFullYear() + Math.floor(G.user.plan.lengthInMonths / 12)
-        );
-        periodEnd.setMonth(
-          (periodEnd.getMonth() + G.user.plan.lengthInMonths) % 12
-        );
+        periodEnd.setMonth(periodEnd.getMonth() + G.user.plan.lengthInMonths);
         plan.nextPayment = formatDate(periodEnd);
         $http
           .get(
             `${G.API_DOMAIN}/client/plan/invoiceHistory`,
             G.oauthHeader({
               params: {
-                subscription: G.user.plan.stripe_subscription_id,
-                map: ["id", "created", "total"]
+                subscriptionId: G.user.plan.stripe_subscription_id,
+                map: ["id", "created", "total", "payment_intent"]
               }
             })
           )
           .then(({ data }) => {
             let invoiceHistory = data;
-            let invoices = [];
-            console.log(invoiceHistory);
+            let paymentIntents = [];
+            // console.log(invoiceHistory);
             plan.invoiceHistory = invoiceHistory.map(invoice => {
-              invoices.push({
-                id: invoice.id,
-                created: invoice.created
-              });
-              console.log(invoice);
+              paymentIntents.push(invoice.payment_intent);
+              // console.log(invoice);
               return {
                 id: invoice.id,
                 formattedDate: formatDate(new Date(invoice.created * 1000)),
                 price: invoice.total / 100,
+                payment_intent: invoice.payment_intent,
                 card: {}
               };
             });
@@ -271,19 +273,20 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
                 `${G.API_DOMAIN}/client/plan/cardForInvoice`,
                 G.oauthHeader({
                   params: {
-                    invoices: invoices,
-                    customer: G.user.stripe_customer_id
+                    paymentIntents
                   }
                 })
               )
               .then(({ data }) => {
                 let cards = data;
                 console.log(cards);
-                for (const invoice in cards) {
-                  let item = plan.invoiceHistory.find(v => v.id == invoice);
+                for (const paymentIntent in cards) {
+                  let item = plan.invoiceHistory.find(
+                    v => v.payment_intent == paymentIntent
+                  );
                   if (!item) continue;
-                  item.card.img = cards[invoice].brand;
-                  item.card.number = `●●●● ●●●● ●●●● ${cards[invoice].last4}`;
+                  item.card.img = cards[paymentIntent].brand;
+                  item.card.number = `●●●● ●●●● ●●●● ${cards[paymentIntent].last4}`;
                 }
                 resolve();
               })

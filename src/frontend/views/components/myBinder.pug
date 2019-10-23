@@ -48,6 +48,10 @@ block component
         br
         h3 Recent payments
         p Up to 12 of the most recent payments we've received for this subscription.
+        .status-box.empty.w3-animate-opacity(ng-show="plan.invoiceHistory.length == 0")
+          .left-justify
+            img(ng-src="../img/empty-list.png")
+            | Nothing to show
         .bill.drop-shadow.w3-animate-opacity(ng-repeat="bill in plan.invoiceHistory")
           p
             b {{bill.formattedDate}}

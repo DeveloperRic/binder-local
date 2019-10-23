@@ -5,7 +5,6 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
   const Block = G.clientModels.Block;
   const File = G.clientModels.File;
   const Download = G.clientModels.Download;
-  //TODO cancel download
 
   // ---------------------------------------
 
@@ -15,10 +14,7 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
       return new Promise((resolve, reject) => {
         if (G.stageStack.switchArgs.download) {
           actions
-            .downloadFiles(
-              G.stageStack.switchArgs.download[0],
-              G.stageStack.switchArgs.download[1]
-            )
+            .downloadFiles(...G.stageStack.switchArgs.download)
             .then(resolve)
             .catch(reject);
         } else {
@@ -29,28 +25,29 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
   });
 
   var actions = ($scope.actions = {
-    downloadFiles: (passedFiles, returnArgs) => {
+    downloadFiles: (...passedFiles) => {
       return new Promise((resolve, reject) => {
-        if (!passedFiles) {
-          G.switchStage("folders", "browse");
+        if (!passedFiles || passedFiles.length == 0) {
           resolve();
         } else {
-          let p = actions.submitDownloadRequest(passedFiles);
-          p.then(resolve);
-          p.catch(() => {
-            G.switchStage("folders", ...returnArgs);
-          }).then(reject);
+          actions
+            .submitDownloadRequest(passedFiles)
+            .then(resolve)
+            .catch(err => {
+              if (err) reject(err);
+              resolve();
+            });
         }
       });
     },
     downloadBlock: () => {
-      G.loadingPopup.visible = true;
+      G.notifyLoading(true);
       Block.find(
         { _id: { $in: G.user.plan.blocks } },
         { latestSize: 1 },
         (err, blocks) => {
           if (err) {
-            G.loadingPopup.visible = false;
+            G.notifyLoading(false);
             return G.notifyError("Couldn't get your blocks", err);
           }
           G.notifyChoose(
@@ -76,7 +73,7 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
             },
             block => {
               if (!block) {
-                return (G.loadingPopup.visible = false);
+                return G.notifyLoading(false);
               }
               block = block.id;
               File.find(
@@ -92,7 +89,7 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
                   actions
                     .submitDownloadRequest(files.map(f => f._id))
                     .catch(() => {
-                      $scope.$apply(() => (G.loadingPopup.visible = false));
+                      $scope.$apply(() => G.notifyLoading(false));
                     });
                 }
               ).lean(true);
@@ -103,95 +100,112 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
       );
     },
     downloadBinder: () => {
-      G.loadingPopup.visible = true;
+      G.notifyLoading(true);
       File.find({ owner: G.user._id }, { _id: 1 }, (err, files) => {
         if (err) {
-          G.loadingPopup.visible = false;
+          G.notifyLoading(false);
           return G.notifyError("Couldn't submit download request", err);
         }
         actions.submitDownloadRequest(files.map(f => f._id)).catch(() => {
-          $scope.$apply(() => (G.loadingPopup.visible = false));
+          $scope.$apply(() => G.notifyLoading(false));
         });
       }).lean(true);
     },
     submitDownloadRequest: filesToDownload => {
       return new Promise((resolve, reject) => {
-        if (
-          !confirm(
-            "Are you sure you want to download these files?\n" +
-              "Please note that once a download request is sent, " +
+        G.notifyInfo(
+          [
+            "Are you sure you want to download these files?",
+            "Please note that once a download request is sent, " +
               "it MUST be completed before a new one can be requested."
-          )
-        ) {
-          return reject();
-        }
-        G.loadingPopup.visible = true;
-        setImmediate(() => {
-          alert(
-            "Next, you will select a folder to download files to.\n" +
-              "Binder will securely download your files to a private location first, before moving it to your selected folder."
-          );
-          let releasePath = G.remote.dialog.showOpenDialog(
-            G.remote.getCurrentWindow(),
-            {
-              title: "Select download location",
-              buttonLabel: "Choose folder",
-              properties: ["openDirectory"]
-            }
-          );
-          if (!releasePath) {
-            G.notifyError("You must select a folder to put downloads in");
-            return $scope.$apply(() => reject());
-          }
-          releasePath = releasePath[0];
-          try {
-            if (fs.readdirSync(releasePath).length > 0) {
-              G.notifyError("Please select an empty folder");
-              return $scope.$apply(() => reject());
-            }
-          } catch (err) {
-            G.notifyError("Something went wrong, please try again", err);
-            return $scope.$apply(() => reject());
-          }
-          requestDownloadResponse.timeoutTask = $interval(
-            () => {
-              if (!requestDownloadResponse.allow) return;
-              G.loadingPopup.visible = requestDownloadResponse.allow = false;
-              G.notifyError(
-                "The download service took too long to respond. Please try again"
-              );
-              reject();
-            },
-            10000 * Math.max(1, (filesToDownload.length / 100).toFixed(0)),
-            1
-          );
-          requestDownloadResponse.allow = true;
-          requestDownloadResponse.reject = reject;
-          requestDownloadResponse.resolve = resolve;
-          filesToDownload = filesToDownload.map(f => f.toString());
-          G.ipcRenderer.send("download-request", filesToDownload, releasePath);
-        });
+          ],
+          false,
+          confirmed => {
+            if (!confirmed) return reject();
+            G.notifyLoading(true);
+            G.notifyInfo(
+              [
+                "Next, you will select a folder to download files to.",
+                "Binder will securely download your files to a private location first, before moving it to your selected folder."
+              ],
+              false,
+              confirmed => {
+                G.notifyLoading(false);
+                if (!confirmed) return;
+                let releasePath = G.remote.dialog.showOpenDialog(
+                  G.remote.getCurrentWindow(),
+                  {
+                    title: "Select download location",
+                    buttonLabel: "Choose folder",
+                    properties: ["openDirectory"]
+                  }
+                );
+                if (!releasePath) {
+                  G.notifyError("You must select a folder to put downloads in");
+                  return reject();
+                }
+                releasePath = releasePath[0];
+                try {
+                  if (fs.readdirSync(releasePath).length > 0) {
+                    G.notifyError("Please select an empty folder");
+                    return reject();
+                  }
+                } catch (err) {
+                  G.notifyError("Something went wrong, please try again", err);
+                  return reject();
+                }
+                let allowResponses = true;
+                let timeoutTask = $interval(
+                  () => {
+                    if (!allowResponses) return;
+                    G.notifyLoading((allowResponses = false));
+                    G.notifyError(
+                      "The download service took too long to respond. Please try again"
+                    );
+                    reject();
+                  },
+                  10000 *
+                    Math.max(1, (filesToDownload.length / 100).toFixed(0)),
+                  1
+                );
+                G.ipcRenderer
+                  .removeAllListeners("download-request-err")
+                  .once("download-request-err", (e, err) => {
+                    if (!allowResponses) return;
+                    G.notifyLoading((allowResponses = false));
+                    $interval.cancel(timeoutTask);
+                    G.notifyError(
+                      "Something went wrong, please try again",
+                      err
+                    );
+                    $scope.$apply(() => reject());
+                  })
+                  .removeAllListeners("download-request-res")
+                  .once("download-request-res", (e, downloadId) => {
+                    if (!allowResponses) return;
+                    G.notifyLoading((allowResponses = false));
+                    $interval.cancel(timeoutTask);
+                    status.downloadId = downloadId;
+                    status
+                      .refresh()
+                      .catch(err => console.error(err))
+                      .finally(() => $scope.$apply(() => resolve(downloadId)));
+                  });
+                filesToDownload = filesToDownload.map(f => f.toString());
+                G.ipcRenderer.send(
+                  "download-request",
+                  filesToDownload,
+                  releasePath
+                );
+              },
+              true
+            );
+          },
+          true
+        );
+        $scope.$apply();
       });
     }
-  });
-
-  let requestDownloadResponse = {
-    allow: false
-  };
-  G.ipcRenderer.on("download-request-err", err => {
-    if (!requestDownloadResponse.allow) return;
-    G.loadingPopup.visible = requestDownloadResponse.allow = false;
-    $interval.cancel(requestDownloadResponse.timeoutTask);
-    G.notifyError("Something went wrong, please try again", err);
-    $scope.$apply(() => requestDownloadResponse.reject());
-  });
-  G.ipcRenderer.on("download-request-res", downloadId => {
-    if (!requestDownloadResponse.allow) return;
-    G.loadingPopup.visible = requestDownloadResponse.allow = false;
-    $interval.cancel(requestDownloadResponse.timeoutTask);
-    status.downloadId = downloadId;
-    status.refresh();
-    $scope.$apply(() => requestDownloadResponse.resolve());
   });
 
   var status = ($scope.status = {
@@ -228,6 +242,7 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
                 _id: 1,
                 files: "$files.list",
                 complete: "$complete",
+                releasePath: "$releasePath",
                 log: "$log"
               }
             },
@@ -241,20 +256,24 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
                     decryptedDate: "$files.decryptedDate"
                   }
                 },
-                complete: {$first: "$complete"},
-                log: {$first: "$log"}
+                complete: { $first: "$complete" },
+                releasePath: { $first: "$releasePath" },
+                log: { $first: "$log" }
               }
             }
           ],
           (err, download) => {
             if (err) return reject(["Couldn't update download status", err]);
             download = download[0];
-            console.log(download);
             if (download) {
               status.parseDownload(download);
             } else if (status.downloadId) {
               status.downloadId = null;
-              return reject(["Couldn't find a download with that id"]);
+              if (isAuto) {
+                status.progress = null;
+              } else {
+                return reject(["Couldn't find a download with that id"]);
+              }
             }
             status.downloadId = null;
             resolve();
@@ -262,17 +281,25 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
         );
       });
     },
+    parseProgress: progress => {
+      status.parseDownload({
+        complete:
+          progress.toCapture.length == 0 && progress.toDecrypt.length == 0,
+        files: progress.toCapture.concat(progress.toDecrypt),
+        releasePath: progress.releasePath,
+        finishBy: progress.finishBy
+      });
+    },
     parseDownload: download => {
-      console.log(download);
+      // console.log(download);
       status.progress = {
         complete: download.complete
       };
       $interval.cancel(status.refreshTask);
-      if (!status.progress.isReady) {
+      if (!download.complete) {
         let deadline = new Date(download.finishBy);
         let deadlineTime = G.dateToTime(deadline);
-        let deadlineDiff =
-          Math.abs(deadline.getTime() - Date.now()) / 86400000;
+        let deadlineDiff = Math.abs(deadline.getTime() - Date.now()) / 86400000;
         if (deadlineDiff == 0) {
           status.progress.finishBy = `Today at ${deadlineTime.simpleHours}:${
             deadlineTime.minutes
@@ -287,27 +314,132 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
           }:${deadlineTime.minutes} ${deadlineTime.isAm ? "AM" : "PM"}`;
         }
         let totalCount = download.files.length;
-        let capturedRatio = download.files.reduce((acc, cur) => acc += (cur.capturedDate ? 1:0), 0) / totalCount;
-        let decryptedRatio = download.files.reduce((acc, cur) => acc += (cur.decryptedDate ? 1:0), 0) / totalCount;
-        console.log(totalCount, capturedRatio, decryptedRatio);
-        status.progress.capturedPercent = Math.round(capturedRatio*100);
-        status.progress.decryptedPercent = Math.round(decryptedRatio*100);
+        let capturedRatio =
+          download.files.reduce(
+            (acc, cur) => (acc += cur.capturedDate ? 1 : 0),
+            0
+          ) / totalCount;
+        let decryptedRatio =
+          download.files.reduce(
+            (acc, cur) => (acc += cur.decryptedDate ? 1 : 0),
+            0
+          ) / totalCount;
+        // console.log(totalCount, capturedRatio, decryptedRatio);
+        status.progress.capturedPercent = Math.round(capturedRatio * 100);
+        status.progress.decryptedPercent = Math.round(decryptedRatio * 100);
         if (capturedRatio == 0) {
           status.progress.capturedClass = "{'flex-grow': 0.01}";
         } else {
-          status.progress.capturedClass = `{'flex-grow': ${capturedRatio.toFixed(2)}}`;
+          status.progress.capturedClass = `{'flex-grow': ${capturedRatio.toFixed(
+            2
+          )}}`;
         }
         if (decryptedRatio == 0) {
           status.progress.decryptedClass = "{'flex-grow': 0.01}";
         } else {
-          status.progress.decryptedClass = `{'flex-grow': ${decryptedRatio.toFixed(2)}}`;
+          status.progress.decryptedClass = `{'flex-grow': ${decryptedRatio.toFixed(
+            2
+          )}}`;
         }
       } else {
         status.showDownload = () => {
-          //TODO show files
-          G.notifyError(download.log.completedDate);
+          let succesful = G.shell.openItem(download.releasePath);
+          console.log("reveal download release path success?", succesful);
         };
       }
+    },
+    defineListeners: () => {
+      return new Promise(resolve => {
+        let handleDownloadEvent = (e, progress) => {
+          if (progress) {
+            status.parseProgress(progress);
+            $scope.$apply();
+          }
+        };
+        G.ipcRenderer
+          .removeAllListeners("download-resume")
+          .on("download-resume", handleDownloadEvent)
+          .removeAllListeners("download-paused")
+          .on("download-paused", () => {
+            if (status.progress) {
+              status.progress.paused = true;
+              $scope.$apply();
+            }
+          })
+          .removeAllListeners("download-captured")
+          .on("download-captured", handleDownloadEvent)
+          .removeAllListeners("download-success")
+          .on("download-success", handleDownloadEvent)
+          .removeAllListeners("download-captured")
+          .on("download-captured", handleDownloadEvent)
+          .removeAllListeners("download-all-done")
+          .on("download-captured", handleDownloadEvent)
+          .removeAllListeners("download-all-failed")
+          .on("download-all-failed", () => {
+            if (status.progress) {
+              status.progress.paused = true;
+              $scope.$apply();
+            }
+          });
+        resolve();
+      });
+    },
+    cancelDownload: () => {
+      G.notifyInfo(
+        [
+          "Are you sure you want to cancel this download? ",
+          "Any downloads that haven't completed yet will be deleted."
+        ],
+        false,
+        confirmed => {
+          if (!confirmed) return;
+          new Promise((resolve, reject) => {
+            G.notifyLoading(true, "Waiting for downlaod service...");
+            let allowResponses = true;
+            let timeoutTask = $interval(
+              () => {
+                if (!allowResponses) return;
+                G.notifyLoading((allowResponses = false));
+                G.notifyError([
+                  "The download service is too busy to respond right now.",
+                  "Your request has been queued, however, you may still try again if you wish."
+                ]);
+                reject();
+              },
+              30000,
+              1
+            );
+            G.ipcRenderer
+              .removeAllListeners("download-cancel-err")
+              .once("download-cancel-err", (e, err) => {
+                if (!allowResponses) return;
+                G.notifyLoading((allowResponses = false));
+                $interval.cancel(timeoutTask);
+                G.notifyError("Something went wrong, please try again", err);
+                reject();
+              })
+              .removeAllListeners("download-cancel-res")
+              .once("download-cancel-res", () => {
+                if (!allowResponses) return;
+                G.notifyLoading((allowResponses = false));
+                $interval.cancel(timeoutTask);
+                status
+                  .refresh(true)
+                  .then(resolve)
+                  .catch(err => console.error(err));
+              });
+            G.ipcRenderer.send("download-cancel");
+          })
+            .catch(err => {
+              if (err) {
+                G.notifyLoading((allowResponses = false));
+                G.notifyError("Something went wrong, please try again", err);
+              }
+            })
+            .finally(() => $scope.$apply());
+        },
+        true
+      );
     }
   });
 
@@ -321,16 +453,15 @@ app.controller("downloadCtrl", function($scope, $rootScope, $http, $interval) {
       return G.notifyError("We couldn't get your user info", err);
     }
     G.user = user;
-    console.log(JSON.parse(JSON.stringify(user)));
     if (!user.plan) {
       stage.status = "error";
       G.notifyError("Cannot show info without a plan");
       return $scope.$apply();
     }
-    Promise.all([stage.checkArgs(), status.refresh()])
+    Promise.all([stage.checkArgs(), status.defineListeners(), status.refresh()])
       .then(() => $scope.$apply(() => (stage.status = "")))
       .catch(err => {
-        if (err[0]) {
+        if (err && err[0]) {
           G.notifyError(err[0], err[1]);
         } else {
           G.notifyError("Something went wrong", err);

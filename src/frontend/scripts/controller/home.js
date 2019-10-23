@@ -5,7 +5,6 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
   const { normalisePath } = G.require("services/coordination");
   const Block = G.clientModels.Block;
   const Tier = G.clientModels.Tier;
-  const User = G.clientModels.User;
 
   // ---------------------------------------
 
@@ -18,42 +17,42 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
     queue: [],
     overallPercent: 0,
     failed: [
-      {
-        filename: "/frontend/img",
-        path:
-          "C:\\Users\\Victor\\GitHub\\binderv4\\electron\\src\\frontend\\img",
-        isNew: true,
-        pendingRetry: true
-      },
-      {
-        filename: "/Desktop/Clutter",
-        path: "C:UsersVictorDesktopClutter",
-        isNew: false
-      },
-      {
-        filename: "/Desktop/saturday",
-        path: "C:UsersVictorDesktopsaturday",
-        isNew: true,
-        pendingRetry: false
-      },
-      {
-        filename: "/frontend/img",
-        path:
-          "C:\\Users\\Victor\\GitHub\\binderv4\\electron\\src\\frontend\\img",
-        isNew: true,
-        pendingRetry: true
-      },
-      {
-        filename: "/Desktop/Clutter",
-        path: "C:UsersVictorDesktopClutter",
-        isNew: false
-      },
-      {
-        filename: "/Desktop/saturday",
-        path: "C:UsersVictorDesktopsaturday",
-        isNew: true,
-        pendingRetry: false
-      }
+      // {
+      //   filename: "/frontend/img",
+      //   path:
+      //     "C:\\Users\\Victor\\GitHub\\binderv4\\electron\\src\\frontend\\img",
+      //   isNew: true,
+      //   pendingRetry: true
+      // },
+      // {
+      //   filename: "/Desktop/Clutter",
+      //   path: "C:UsersVictorDesktopClutter",
+      //   isNew: false
+      // },
+      // {
+      //   filename: "/Desktop/saturday",
+      //   path: "C:UsersVictorDesktopsaturday",
+      //   isNew: true,
+      //   pendingRetry: false
+      // },
+      // {
+      //   filename: "/frontend/img",
+      //   path:
+      //     "C:\\Users\\Victor\\GitHub\\binderv4\\electron\\src\\frontend\\img",
+      //   isNew: true,
+      //   pendingRetry: true
+      // },
+      // {
+      //   filename: "/Desktop/Clutter",
+      //   path: "C:UsersVictorDesktopClutter",
+      //   isNew: false
+      // },
+      // {
+      //   filename: "/Desktop/saturday",
+      //   path: "C:UsersVictorDesktopsaturday",
+      //   isNew: true,
+      //   pendingRetry: false
+      // }
     ],
     initialised: false,
     current: null,
@@ -62,7 +61,7 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
       if (uploads.initialised) return;
       G.ipcRenderer.removeAllListeners("upload-resume");
       G.ipcRenderer.on("upload-resume", (event, arg) => {
-        console.log("==== got resume ====");
+        // console.log("==== got resume ====");
         uploads
           .refresh(arg)
           .catch(err => {
@@ -72,7 +71,7 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
       });
       G.ipcRenderer.removeAllListeners("upload-seccess");
       G.ipcRenderer.on("upload-success", (event, arg) => {
-        console.log("==== got success ====");
+        // console.log("==== got success ====");
         if (uploads.status != "") return;
         let itemIndex = uploads.queue.findIndex(u => u.path == arg.path);
         if (itemIndex >= 0) {
@@ -83,7 +82,7 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
       });
       G.ipcRenderer.removeAllListeners("upload-failed");
       G.ipcRenderer.on("upload-failed", (event, arg) => {
-        console.log("==== got failed ====");
+        // console.log("==== got failed ====");
         if (uploads.status != "") return;
         let itemIndex = uploads.queue.findIndex(u => u.path == arg.path);
         if (itemIndex >= 0) {
@@ -94,15 +93,15 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
         }
       });
       G.ipcRenderer.removeAllListeners("upload-all-uploaded");
-      G.ipcRenderer.on("upload-all-uploaded", (event, args) => {
-        console.log("==== got all-done ====");
+      G.ipcRenderer.on("upload-all-done", (event, args) => {
+        // console.log("==== got all-done ====");
         if (uploads.status != "") return;
         uploads.current = null;
         uploads.queue.length = 0;
       });
       G.ipcRenderer.removeAllListeners("upload-all-failed");
       G.ipcRenderer.on("upload-all-failed", (event, arg) => {
-        console.log("==== got all-failed ====");
+        // console.log("==== got all-failed ====");
         if (uploads.status != "") return;
         uploads.queue.length = 0;
         arg.changed.forEach(item => {
@@ -298,47 +297,43 @@ app.controller("homeCtrl", function($scope, $rootScope, $http, $interval) {
         if (plan.maxTotalSize != plan.maxTotalSize.toFixed(0)) {
           plan.maxTotalSize = plan.maxTotalSize.toFixed(1);
         }
-        Tier.findOne(
-          { id: G.user.plan.tier },
-          { pricePerMonth: 1 },
-          (err, tier) => {
-            if (err || !tier) {
-              return reject([
-                "Couldn't get your info",
-                err || new Error("Tier not found")
-              ]);
-            }
-            switch (G.user.plan.lengthInMonths) {
-              case 1:
-                plan.cycle = "MONTHLY";
-                break;
-              case 4:
-                plan.cycle = "QUATERLY";
-                break;
-              case 12:
-                plan.cycle = "ANUALLY";
-                break;
-              default:
-                plan.cycle = `EVERY ${G.user.plan.lengthInMonths} MONTHS`;
-            }
-            plan.price = tier.pricePerMonth * G.user.plan.lengthInMonths;
-            let formatDate = date => {
-              return `${date.getDate()} 
-            ${G.longMonths[date.getMonth()]} ${date.getFullYear()}`;
-            };
-            let periodEnd = new Date(G.user.plan.currentPeriodStart);
-            periodEnd.setFullYear(
-              periodEnd.getFullYear() +
-                Math.floor(G.user.plan.lengthInMonths / 12)
-            );
-            periodEnd.setMonth(
-              (periodEnd.getMonth() + G.user.plan.lengthInMonths) % 12
-            );
-            plan.nextPayment = formatDate(periodEnd);
-            plan.status = "";
-            resolve();
+        Tier.findById(G.user.plan.tier, { pricePerMonth: 1 }, (err, tier) => {
+          if (err || !tier) {
+            return reject([
+              "Couldn't get your info",
+              err || new Error("Tier not found")
+            ]);
           }
-        );
+          switch (G.user.plan.lengthInMonths) {
+            case 1:
+              plan.cycle = "MONTHLY";
+              break;
+            case 4:
+              plan.cycle = "QUATERLY";
+              break;
+            case 12:
+              plan.cycle = "ANUALLY";
+              break;
+            default:
+              plan.cycle = `EVERY ${G.user.plan.lengthInMonths} MONTHS`;
+          }
+          plan.price = tier.pricePerMonth * G.user.plan.lengthInMonths;
+          let formatDate = date => {
+            return `${date.getDate()} 
+            ${G.longMonths[date.getMonth()]} ${date.getFullYear()}`;
+          };
+          let periodEnd = new Date(G.user.plan.currentPeriodStart);
+          periodEnd.setFullYear(
+            periodEnd.getFullYear() +
+              Math.floor(G.user.plan.lengthInMonths / 12)
+          );
+          periodEnd.setMonth(
+            (periodEnd.getMonth() + G.user.plan.lengthInMonths) % 12
+          );
+          plan.nextPayment = formatDate(periodEnd);
+          plan.status = "";
+          resolve();
+        });
       });
     },
     defineChart: () => {

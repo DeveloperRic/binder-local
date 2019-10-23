@@ -10,13 +10,14 @@
   display: flex;
   margin-left: -10px;
   margin-right: -10px;
-  padding: 20px 10px;
+  padding: 0 10px 20px 10px;
   justify-content: space-evenly;
   border-radius: 12px;
 }
 
 #plans .tier {
   min-height: 100%;
+  margin-top: 20px;
   padding-left: 5px;
   padding-right: 5px;
 }
@@ -52,12 +53,13 @@
 #plans .billing {
   display: flex;
   margin-bottom: 30px;
-  padding: 7px;
+  padding: 0 7px 7px 7px;
   justify-content: space-between;
 }
 
 #plans .billing .options {
   display: flex;
+  margin-top: 7px;
 }
 
 #plans .billing .options button {
@@ -68,8 +70,9 @@
 
 #plans .billing .summary {
   display: inline-flex;
-  font-weight: 300;
+  margin-top: 7px;
   align-items: center;
+  font-weight: 300;
 }
 
 #plans .billing .summary button {

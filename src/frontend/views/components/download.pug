@@ -26,7 +26,7 @@ block component
         h3 I want to download..
         br
         .actions
-          .action.drop-shadow(ng-click="actions.downloadFiles()")
+          .action.drop-shadow(ng-click="actions.downloadFiles()", ng-show="false")
             i.material-icons.color-accent insert_drive_file
             h3 Files
             span.desc (a small set of files)
@@ -41,7 +41,7 @@ block component
       ng-show(ng-show="status.progress")
         h3 Download request
         .progress(ng-show="!status.progress.complete")
-          .item.waiting(ng-show="!status.progress.capturedClass && !status.progress.decryptedClass")
+          .item.waiting(ng-show="status.progress.paused || (!status.progress.capturedClass && !status.progress.decryptedClass)")
             i.material-icons pause
             h3
               | !{smallCircleSpinner}
@@ -63,6 +63,7 @@ block component
               | {{status.progress.decryptedPercent}}%
           .deadline
             | Deadline: {{status.progress.finishBy}}
+            button.border-accent(ng-click="status.cancelDownload()") Cancel Download
         .progress(ng-show="status.progress.complete")
           .item.done
             i.material-icons done_all
@@ -80,8 +81,8 @@ block component
           b Please do not request downloads unless you absolutely need to.
         p
           | Irrespective of the download size, the entire process can be very resource intensive. 
-          | In order to fufill a download request, we first transfer the files from our data store to a secure cloud location and package them into a smaller internet-friendly size. 
-          | Next, Binder downloads that package onto your machine and begins decrypting the files locally. 
+          | In order to fufill a download request, we start by transfering the files from our secure data store onto your machine. 
+          | At the same time as this happens, Binder begins decrypting each file locally. 
           | Once this is completed, you will be notified that your files are ready.
         br
         h2 Download size
@@ -90,17 +91,20 @@ block component
           | The 
           b sizes listed at the top of this page are estimates
           |  they do not represent exactly how big your download package will be.
+        p
+          | Please note that due to the nature of our download process, 
+          b you will need approximately twice as much free space as your largest file.
+          |  This is because we stream downloads & decryptions to make them much quicker. 
+          | For example, if your biggest file = 10 GB, then you will need approximately 20 GB of free space.
         br
         h2 Download time
         br
         p
-          | We will prepare your files by placing them into a package for download in the background. 
-          | The download package is essentially a single download containing all the files you requested to download. 
-        p
-          | Depending on the size of the download, it can take anywhere between seconds and several hours to prepare your package. 
+          | Depending on the size of the download, it can take anywhere between seconds and several hours to finish your download. 
           | Estimated package generation and download times are listed below. 
           i (download times are based on an 80Mbps internet connection)
-          //- gcp = 71.52557373046875 Mb/s , avg local = 9.5367431640625 Mb/s TODO: avg is actually 10Mb/s
+          //- gcp = 71.52557373046875 Mb/s , avg local = 9.5367431640625 Mb/s NOTE: avg is actually 10Mb/s
+          //- 18 bytes/ms crpyto
         table.times
           tr
             td(rowspan="2")
@@ -116,6 +120,9 @@ block component
                 b Final download
               p Between < 2 seconds and < 2 hours
           tr
+            td(colspan="2")
+              hr
+          tr
             td(rowspan="2")
               | Block
               span.size  ( < 500 Gb )
@@ -128,6 +135,9 @@ block component
               p
                 b Final download
               p Between < 45 minutes and < 15 hours
+          tr
+            td(colspan="2")
+              hr
           tr
             td(rowspan="2")
               | Everything

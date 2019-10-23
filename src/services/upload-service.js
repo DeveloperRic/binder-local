@@ -1,5 +1,5 @@
 const fs = require("fs");
-const crypto = require("crypto");
+const uuidv4 = require("uuid/v4");
 const ip = require("ip");
 const mime = require("mime-types");
 const pathParse = require("path-parse");
@@ -9,7 +9,8 @@ const checkDiskSpace = require("check-disk-space");
 const {
   isLargeFile,
   countPartsForLargeFile,
-  clearDir
+  clearDir,
+  beginSession
 } = require("./coordination.js");
 const { getB2Key } = require("../security/keyManagement");
 const { encryptAndCompress } = require("../security/storeSecure");
@@ -18,7 +19,7 @@ const { PROD_DEV_MODE, resolveDir } = require("../prodVariables");
 const b2 = new (require("backblaze-b2"))(getB2Key());
 
 const Tier = require("../model/tier");
-const User = require("../model/user");
+const Plan = require("../model/plan");
 const Bucket = require("../model/bucket");
 const Block = require("../model/block");
 const File = require("../model/file");
@@ -41,6 +42,7 @@ let isDownloadsWaiting;
 let downloadsResume;
 let uploadHandlers = {
   resume: null,
+  paused: null,
   progress: null,
   success: null,
   failed: null,
@@ -60,9 +62,12 @@ let throttler = {
  * setting state variables, and verifing user's plan status.
  * NOTE: Will reject the promise only if an error occurs or the user's status could not be verified.
  * @param {"ObjectId"} uid
+ * @param {"ObjectId"} planId
  * @param {function} downloadsPaused
+ * @param {function} downloadsWaiting
+ * @param {function} downloadResume
  */
-function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
+function init(uid, planId, downloadsPaused, downloadsWaiting, downloadResume) {
   return new Promise((resolve, reject) => {
     userId = uid.toString();
     isDownloadsPaused = downloadsPaused;
@@ -77,7 +82,7 @@ function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
         files = files.filter(file => file.isFile());
         // finalise if no schedules found
         if (files.length == 0) {
-          return finaliseInit(uid, resolve, reject);
+          return finaliseInit(planId, resolve, reject);
         }
         // parse all schedules
         files.forEach(file => {
@@ -120,7 +125,7 @@ function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
           files.forEach(file => fs.unlinkSync(`${UPLOAD_DIR}/${file.name}`));
           // finalise initialisation
           finaliseInit(
-            uid,
+            planId,
             () => {
               if (callback) callback();
               resolve();
@@ -146,84 +151,78 @@ function init(uid, downloadsPaused, downloadsWaiting, downloadResume) {
   });
 }
 
-function finaliseInit(uid, resolve, reject) {
+function finaliseInit(planId, resolve, reject) {
   // get user info for use in uploads
-  User.findById(
-    uid,
-    { "plan.expired": 1, "plan.tier": 1, "plan.blocks": 1 },
-    (err, user) => {
-      if (err) return reject(err);
-      if (!user) return reject(new Error("User not found"));
-      if (!user.plan) {
-        return reject(new Error("User doesn't have a plan"));
-      } else if (user.plan.expired) {
-        return reject(new Error("User's plan has expired"));
-      }
-      // get user's blocks for use in uploads
-      Block.find(
-        { _id: { $in: user.plan.blocks } },
-        { _id: 1, bucket: 1, maxSize: 1, latestSize: 1 },
-        (err, blocks) => {
-          if (err) return reject(err);
-          if (blocks.length == 0) {
-            return reject(new Error("No allowed blocks found"));
-          }
-          // get associated buckets for b2_bucket_id selection
-          Bucket.find(
-            { _id: { $in: blocks.map(bl => bl.bucket) } },
-            { _id: 1, b2_bucket_id: 1 },
-            (err, buckets) => {
-              if (err) return reject(err);
-              if (buckets.length == 0) {
-                return reject(
-                  new Error("No allowed buckets found / bucket mismatch")
-                );
-              }
-              allowedBlocks.length = 0;
-              // ensure correct retrieval of blocks and their buckets
-              for (let i in blocks) {
-                const block = blocks[i];
-                let bucket = buckets.find(
-                  bu => bu._id.toString() == block.bucket
-                );
-                if (!bucket) {
-                  return reject(new Error("Bucket mismatch"));
-                }
-                bucket._id = bucket._id.toString();
-                allowedBlocks.push({
-                  _id: block._id.toString(),
-                  bucket,
-                  maxSize: block.maxSize
-                });
-              }
-              // get user's plan tier info for version control
-              // and archive throttling
-              Tier.findOne(
-                { id: user.plan.tier },
-                { archiveSpeed: 1, fileVersioningAllowed: 1 },
-                (err, tier) => {
-                  if (err) return reject(err);
-                  if (!tier)
-                    return reject(new Error("Failed to load Tier data"));
-                  userTier = tier;
-                  clearDir(HOLD_DIR)
-                    .catch(err => console.error(err))
-                    .then(() => {
-                      b2.authorize()
-                        .then(() => {
-                          initialised = true;
-                          resolve();
-                        })
-                        .catch(reject);
-                    });
-                }
-              );
-            }
-          ).lean(true);
-        }
+  Plan.findById(planId, { expired: 1, tier: 1, blocks: 1 }, (err, plan) => {
+    if (err) return reject(err);
+    if (!plan || plan.expired) {
+      return reject(
+        new Error("User doesn't have a plan / user's plan has expired")
       );
     }
-  );
+    // get user's blocks for use in uploads
+    Block.find(
+      { _id: { $in: plan.blocks } },
+      { _id: 1, bucket: 1, maxSize: 1, latestSize: 1 },
+      (err, blocks) => {
+        if (err) return reject(err);
+        if (blocks.length == 0) {
+          return reject(new Error("No allowed blocks found"));
+        }
+        // get associated buckets for b2_bucket_id selection
+        Bucket.find(
+          { _id: { $in: blocks.map(bl => bl.bucket) } },
+          { _id: 1, b2_bucket_id: 1 },
+          (err, buckets) => {
+            if (err) return reject(err);
+            if (buckets.length == 0) {
+              return reject(
+                new Error("No allowed buckets found / bucket mismatch")
+              );
+            }
+            allowedBlocks.length = 0;
+            // ensure correct retrieval of blocks and their buckets
+            for (let i in blocks) {
+              const block = blocks[i];
+              let bucket = buckets.find(
+                bu => bu._id.toString() == block.bucket
+              );
+              if (!bucket) {
+                return reject(new Error("Bucket mismatch"));
+              }
+              bucket._id = bucket._id.toString();
+              allowedBlocks.push({
+                _id: block._id.toString(),
+                bucket,
+                maxSize: block.maxSize
+              });
+            }
+            // get user's plan tier info for version control
+            // and archive throttling
+            Tier.findById(
+              plan.tier,
+              { archiveSpeed: 1, fileVersioningAllowed: 1 },
+              (err, tier) => {
+                if (err) return reject(err);
+                if (!tier) return reject(new Error("Failed to load Tier data"));
+                userTier = tier;
+                clearDir(HOLD_DIR)
+                  .catch(err => console.error(err))
+                  .then(() => {
+                    b2.authorize()
+                      .then(() => {
+                        initialised = true;
+                        resolve();
+                      })
+                      .catch(reject);
+                  });
+              }
+            );
+          }
+        ).lean(true);
+      }
+    );
+  });
 }
 
 /**
@@ -285,18 +284,12 @@ function createBlankSchedule() {
  */
 function verifyPlanNotExpired() {
   return new Promise((resolve, reject) => {
-    User.findOne({ _id: userId }, { "plan.expired": 1 }, (err, user) => {
+    Plan.findOne({ owner: userId, expired: false }, { _id: 1 }, (err, plan) => {
       if (err) {
         allowProcessing = false;
         return reject(err);
       }
-      if (!user) {
-        allowProcessing = false;
-        return reject(
-          new Error("invalid initialisation of userId (user not found)")
-        );
-      }
-      if (!user.plan || user.plan.expired) {
+      if (!plan) {
         allowProcessing = false;
         return reject();
       } else {
@@ -435,6 +428,10 @@ function changeIsNewer(localPath, modifiedTime) {
   });
 }
 
+/**
+ * Attaches upload handlers. Will replace any old handlers
+ * @param {Object<string, function>} handlers
+ */
 function setUploadHandlers(handlers) {
   for (let key in handlers) {
     if (uploadHandlers.hasOwnProperty(key)) {
@@ -503,6 +500,9 @@ function pause() {
       if (!uploading) {
         clearInterval(task);
         resolve();
+        if (uploadHandlers.paused) {
+          uploadHandlers.paused();
+        }
       }
     }, 1000);
   });
@@ -624,6 +624,12 @@ function resume() {
               holder.item.bytes.done = 0;
               holder.item.bytes.failed = 0;
             }
+            let removeChange = path => {
+              return currentSchedule.changed.splice(
+                currentSchedule.changed.findIndex(f => f.path == path),
+                1
+              )[0];
+            };
             let promise = holder.function(holder.item);
             delete holder.function;
             promises.push(holder);
@@ -638,12 +644,12 @@ function resume() {
                 try {
                   console.error(err.response.data);
                 } catch (error) {
-                  console.error(err.toString());
+                  console.error(err);
                 }
                 if (holder.item.bytes) {
-                  holder.item.bytes.failed =
-                    holder.item.bytes.total - holder.item.bytes.done;
-                  currentSchedule.changed.push(currentSchedule.changed.shift());
+                  holder.item.bytes.failed = holder.item.bytes.total;
+                  holder.item.bytes.done = 0;
+                  currentSchedule.changed.push(removeChange(holder.item.path));
                 } else {
                   holder.item.failed = true;
                   currentSchedule.removed.push(currentSchedule.removed.shift());
@@ -658,12 +664,7 @@ function resume() {
                   //             holder.item.bytes.total
                   if (holder.item.bytes.done == holder.item.bytes.total) {
                     console.log("upload confirmed successful");
-                    currentSchedule.changed.splice(
-                      currentSchedule.changed.findIndex(
-                        f => f.path == holder.item.path
-                      ),
-                      1
-                    );
+                    removeChange(holder.item.path);
                     // increment throttler after the successful upload
                     throttler.periodGbs += holder.item.bytes.total / 1073741824;
                   } else {
@@ -718,7 +719,7 @@ function randomFileName() {
   if (userTier.fileVersioningAllowed) {
     name = "versioned/";
   }
-  name += `${userId}/${crypto.randomBytes(32).toString("hex")}`;
+  name += `${userId}/${uuidv4()}`;
   return name;
 }
 
@@ -850,9 +851,7 @@ function selectUploadBlock(fileDat) {
               // block is still projected to be too big, something's wrong
               return reject(
                 new Error(
-                  `Block ${
-                    block._id
-                  } has corrupted latestSize and/or maxSize fields!`
+                  `Block ${block._id} has corrupted latestSize and/or maxSize fields!`
                 )
               );
             }
@@ -886,38 +885,36 @@ function selectUploadBlock(fileDat) {
                     )
                   );
                 }
-                Block.aggregate(
-                  [
-                    { $match: { _id: blocks[0]._id } },
-                    // subtract its maxSize by fileUpdateOverhead
-                    {
-                      $addFields: {
-                        maxSize: { $subtract: ["$maxSize", fileUpdateOverhead] }
-                      }
-                    },
-                    { $limit: 0 },
-                    // select the file's current block
-                    { $match: { _id: fileBlock.block } },
-                    // add extra space to the block
-                    {
-                      $addFields: {
-                        maxSize: { $add: ["$maxSize", fileUpdateOverhead] }
-                      }
-                    },
-                    // refuse returning of block data (saves network use)
-                    { $limit: 0 }
-                  ],
-                  err => {
-                    if (err) {
-                      return reject(
+                beginSession()
+                  .then(session => {
+                    // subtract the found block's maxSize by fileUpdateOverhead
+                    Block.updateOne(
+                      { _id: blocks[0]._id },
+                      { $inc: { maxSize: -fileUpdateOverhead } },
+                      { session }
+                    );
+                    // add extra space to the current file block
+                    Block.updateOne(
+                      { _id: fileBlock.block },
+                      { $inc: { maxSize: fileUpdateOverhead } },
+                      { session }
+                    );
+                    session
+                      .commitTransaction()
+                      .then(() => resolve(fileBlock))
+                      .catch(err => {
                         new Error(
-                          "Failed to allocate more space in the block for the file update"
-                        )
-                      );
-                    }
-                    resolve(fileBlock);
-                  }
-                );
+                          "Failed to allocate more space in the block for the file update",
+                          err
+                        );
+                      });
+                  })
+                  .catch(err => {
+                    new Error(
+                      "Failed to allocate more space in the block for the file update",
+                      err
+                    );
+                  });
               }
             );
           } else {
@@ -1413,7 +1410,7 @@ function onUploadComplete(fileDat, data, initVect, session, resolve, reject) {
   let ipAddress = ip.address("public", "ipv6") || ip.address("public", "ipv4");
   // Update the file doc in MongoDB this
   // verifies the upload completed successfuly
-  console.log("fileDat.size", fileDat.size, "isNew", !!fileDat.isNew);
+  console.log(data.fileName, "fileDat.size", fileDat.size, "isNew", !!fileDat.isNew);
   let fileDoc = {
     idInDatabase: data.fileId,
     nameInDatabase: data.fileName,
@@ -1641,21 +1638,6 @@ function removeFile(fileDat) {
             );
           }
         );
-      })
-      .catch(reject);
-  });
-}
-
-/**
- * @returns {Promise<mongoose.ClientSession>}
- */
-function beginSession() {
-  return new Promise((resolve, reject) => {
-    mongoose
-      .startSession()
-      .then(session => {
-        session.startTransaction();
-        resolve(session);
       })
       .catch(reject);
   });

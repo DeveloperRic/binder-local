@@ -5,6 +5,7 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
   const { normalisePath } = G.require("services/coordination");
   const File = G.clientModels.File;
   const Block = G.clientModels.Block;
+  const Download = G.clientModels.Download;
 
   // ---------------------------------------
 
@@ -13,7 +14,7 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
     checkArgs: () => {
       if (G.stageStack.switchArgs.folders) {
         if (G.stageStack.switchArgs.folders.includes("browse")) {
-          broswer.open();
+          G.switchStage("explore");
         }
       }
     }
@@ -238,16 +239,23 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
       if (!folder || !folder.path) {
         return G.notifyError("Cannot remove folder");
       }
-      if (!confirm("Are you sure you want to remove this folder?")) return;
-      folder.status = "loading";
-      setImmediate(() => {
-        G.ipcRenderer.sendSync("spider-select-folder", {
-          path: folder.path,
-          include: false
-        });
-        folder.status = "";
-        folders.load();
-      });
+      G.notifyInfo(
+        "Are you sure you want to remove this folder?",
+        false,
+        confirmed => {
+          if (!confirmed) return;
+          folder.status = "loading";
+          setImmediate(() => {
+            G.ipcRenderer.sendSync("spider-select-folder", {
+              path: folder.path,
+              include: false
+            });
+            folder.status = "";
+            folders.load();
+          });
+        },
+        true
+      );
     },
     viewStats: folder => {
       G.switchStage("stats", folder.path);
@@ -261,7 +269,8 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
     autoLoadCount: 0,
     load: () => {
       return new Promise((resolve, reject) => {
-        let doneFiles, doneBlocks;
+        let dateLowerBound = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        let doneFiles, doneBlocks, doneDownloads;
         let items = [];
         history.status = "loading";
         updates.setUpdating(true);
@@ -296,7 +305,12 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
           );
         };
         File.find(
-          { owner: G.user._id },
+          {
+            owner: G.user._id,
+            "log.latestSizeCalculationDate": {
+              $gte: dateLowerBound
+            }
+          },
           {
             "log.detected": 1,
             "log.updateHistory.list": { $slice: 6 },
@@ -307,7 +321,6 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
           (err, files) => {
             if (err) return reject(["Couldn't load folder history", err]);
             files.forEach(file => {
-              // TODO add file/block downloads to history
               items.push({
                 action: "File detected in file system",
                 timestamp: new Date(file.log.detected)
@@ -322,14 +335,18 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
                 });
               }
             });
-            doneFiles = true;
-            if (doneFiles && doneBlocks) onFound();
+            if ((doneFiles = true) && doneBlocks && doneDownloads) onFound();
           }
         )
           .sort({ "log.latestSizeCalculationDate": -1 })
           .limit(6);
         Block.find(
-          { owner: G.user._id },
+          {
+            owner: G.user._id,
+            "log.latestSizeCalculationDate": {
+              $gte: dateLowerBound
+            }
+          },
           {
             "log.provisionedDate": 1,
             "log.blockBinnedHistory.list": { $slice: 6 },
@@ -359,17 +376,33 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
                 });
               }
             });
-            doneBlocks = true;
-            if (doneFiles && doneBlocks) onFound();
+            if (doneFiles && (doneBlocks = true) && doneDownloads) onFound();
+          }
+        ).sort({ "log.latestSizeCalculationDate": -1 });
+        Download.find(
+          {
+            owner: G.user._id,
+            "log.requestedDate": { $gte: dateLowerBound },
+            "log.completedDate": { $exists: true }
+          },
+          {
+            "log.requestedDate": 1,
+            "files.count": 1
+          },
+          (err, downloads) => {
+            if (err) return reject(["Couldn't load folder history", err]);
+            downloads.forEach(download => {
+              items.push({
+                action: `Downloaded ${download.files.count} file${
+                  download.files.count > 1 ? "s" : ""
+                }`,
+                timestamp: new Date(download.log.requestedDate)
+              });
+            });
+            if (doneFiles && doneBlocks && (doneDownloads = true)) onFound();
           }
         );
       });
-    }
-  });
-
-  var broswer = ($scope.broswer = {
-    open: () => {
-      G.notifyError("File broswer not yet implemented");
     }
   });
 

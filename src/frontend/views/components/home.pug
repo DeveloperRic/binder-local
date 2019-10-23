@@ -115,7 +115,7 @@ block component
             .col-md-8.line-graph
               b.color-muted Viewing data for current period
               canvas#line-graph(height="150")
-          .row.failed
+          .row.failed(ng-show="uploads.failed.length > 0")
             .failed-count.col-md-2(ng-show="false")
               h3 Failed uploads
               .count {{uploads.failed.length}}

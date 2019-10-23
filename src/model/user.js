@@ -1,102 +1,6 @@
-var mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
-var planSchema = mongoose.Schema({
-  stripe_subscription_id: {
-    type: String,
-    required: true
-  },
-  tier: {
-    type: String,
-    enum: ["BASIC", "MID", "TOP"],
-    required: true
-  },
-  currentPeriodStart: {
-    type: Number,
-    required: true
-  },
-  lengthInMonths: {
-    type: Number,
-    min: 1,
-    required: true
-  },
-  expired: {
-    type: Boolean,
-    default: false
-  },
-  blocks: {
-    type: ["ObjectId"],
-    required: true,
-    validate: v => v.length > 0
-  },
-  defaultBlockSize: {
-    type: Number,
-    min: 0,
-    set: v => Math.ceil(v),
-    required: true
-  },
-  maxTotalSize: {
-    type: Number,
-    min: 0,
-    set: v => Math.ceil(v),
-    required: true,
-    validate: v => v >= this.plan.defaultBlockSize
-  },
-  latestTotalSize: {
-    type: Number,
-    min: 0,
-    default: 0
-  },
-  log: {
-    type: {
-      purchasedDate: {
-        type: Number
-      }
-    },
-    // get rid of this once a log item has
-    // an assigned default value
-    default: {}
-  },
-  renewals: {
-    type: [
-      {
-        renewalDate: {
-          type: Number,
-          required: true
-        },
-        renewalReason: {
-          type: String,
-          trim: true,
-          required: true
-        },
-        oldTier: {
-          type: String,
-          enum: ["BASIC", "MID", "TOP"],
-          required: () => this.newTier != null
-        },
-        newTier: {
-          type: String,
-          enum: ["BASIC", "MID", "TOP"],
-          required: () => this.oldTier != null
-        },
-        oldMaxTotalSize: {
-          type: Number,
-          min: 0,
-          set: v => Math.ceil(v),
-          required: () => this.newMaxTotalSize != null
-        },
-        newMaxTotalSize: {
-          type: Number,
-          min: 0,
-          set: v => Math.ceil(v),
-          required: () => this.oldMaxTotalSize != null
-        }
-      }
-    ],
-    default: []
-  }
-});
-
-var userSchema = mongoose.Schema({
+const userSchema = mongoose.Schema({
   email: {
     type: String,
     index: true,
@@ -113,11 +17,51 @@ var userSchema = mongoose.Schema({
     default: false
   },
   plan: {
-    type: planSchema
+    type: "ObjectId"
   },
   profile: {
     type: Object,
     required: true
+  },
+  billing: {
+    firstName: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+    lastName: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+    address: {
+      line1: {
+        type: String,
+        trim: true,
+        default: ""
+      },
+      line2: {
+        type: String,
+        trim: true,
+        default: ""
+      },
+      city: {
+        type: String,
+        trim: true,
+        default: ""
+      },
+      postal_code: {
+        type: String,
+        trim: true,
+        validate: v => /^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(v),
+        default: ""
+      },
+      country: {
+        type: String,
+        trim: true,
+        enum: ["Canada"]
+      }
+    }
   },
   stripe_customer_id: {
     type: String
@@ -129,7 +73,11 @@ var userSchema = mongoose.Schema({
   createdDate: {
     type: Number,
     default: () => Date.now()
+  },
+  pendingDeletion: {
+    type: Boolean,
+    default: false
   }
 });
 
-var User = (module.exports = mongoose.model("User", userSchema));
+module.exports = mongoose.model("User", userSchema);

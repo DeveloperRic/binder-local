@@ -99,6 +99,7 @@
     "path-to-regexp": "^3.0.0",
     "request": "^2.88.0",
     "speedtest-net": "^1.5.1",
+    "uuid": "^3.3.2",
     "winston": "^3.2.1"
   },
   "devDependencies": {

@@ -20,12 +20,14 @@ var fileSchema = mongoose.Schema({
   localPath: {
     type: String,
     required: true,
-    index: true
+    index: true,
+    immutable: true
   },
   owner: {
     type: "ObjectId",
     required: true,
-    index: true
+    index: true,
+    immutable: true
   },
   block: {
     type: "ObjectId",
@@ -57,6 +59,10 @@ var fileSchema = mongoose.Schema({
       validate: v => !this.download.paused && v > this.download.started
     }
   },
+  ignored: {
+    type: Boolean,
+    default: false
+  },
   binned: {
     type: Boolean,
     default: false
@@ -72,7 +78,8 @@ var fileSchema = mongoose.Schema({
   originalSize: {
     type: Number,
     min: 0,
-    required: true
+    required: true,
+    immutable: true
   },
   latestSize: {
     type: Number,
@@ -85,22 +92,27 @@ var fileSchema = mongoose.Schema({
         {
           idInDatabase: {
             type: String,
-            required: true
+            required: true,
+            immutable: true
           },
           dateInserted: {
             type: Number,
-            required: true
+            required: true,
+            immutable: true
           },
           dateDeleted: {
-            type: Number
+            type: Number,
+            immutable: true
           },
           originalSize: {
             type: Number,
-            required: true
+            required: true,
+            immutable: true
           },
           initVect: {
             type: String,
-            required: true
+            required: true,
+            immutable: true
           }
         }
       ],
@@ -150,6 +162,18 @@ var fileSchema = mongoose.Schema({
       }
     },
     restoredHistory: {
+      list: {
+        type: [historyItemSchema],
+        default: []
+      },
+      count: {
+        type: Number,
+        min: 0,
+        default: 0,
+        set: v => Math.floor(v)
+      }
+    },
+    rollbackHistory: {
       list: {
         type: [historyItemSchema],
         default: []

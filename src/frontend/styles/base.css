@@ -148,8 +148,9 @@ ul {
   display: flex;
   padding: 22px 18px 10px 10px;
   align-items: center;
-  justify-content: space-between;
-  font: 600 14px "Montserrat";
+  justify-content: space-evenly;
+  flex-wrap: wrap;
+  font: 600 0.9rem "Montserrat";
 }
 
 #nav .head img {
@@ -159,13 +160,15 @@ ul {
 }
 
 #nav .head .navigation {
+  display: flex;
   margin-left: 15px;
+  flex-wrap: nowrap;
 }
 
 #nav .head .navigation i {
   padding: 7px;
   border-radius: 5px;
-  font-size: 20px;
+  font-size: 1.3em;
   cursor: pointer;
 }
 
@@ -316,6 +319,53 @@ body.darkmode #nav .buttons a:hover {
   width: 50%;
 }
 
+#infoPopup {
+  align-items: center;
+  justify-content: center;
+}
+
+#infoPopup .body {
+  width: 50%;
+}
+
+#infoPopup .info-popup {
+  display: flex;
+  width: 100%;
+  margin-bottom: 20px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 10px;
+}
+
+#infoPopup .info-popup i {
+  margin-right: 5px;
+}
+
+#infoPopup .info-popup .header {
+  display: flex;
+  width: 100%;
+  padding: 7px 10px 0 10px;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  justify-content: flex-end;
+  font-size: 18px;
+}
+
+#infoPopup .info-popup .header + .text {
+  padding-top: 10px;
+}
+
+#infoPopup .info-popup .text {
+  width: 100%;
+  padding: 30px 10% 20px 10%;
+  font-size: 16px;
+}
+
+#infoPopup .dismiss {
+  width: 50%;
+}
+
 .bg-accent {
   background-color: #4caf50 !important;
 }
@@ -373,6 +423,10 @@ body.darkmode .bg-secondary-strong {
 
 .border-accent {
   border: 1px solid #4caf50 !important;
+}
+
+.border-red {
+  border: 1px solid #f44336;
 }
 
 .border-secondary {
@@ -635,6 +689,25 @@ body.darkmode .drop-shadow-strong {
 
 .status-box .error {
   color: #f44336;
+}
+
+.status-box.empty {
+  font-size: 14px;
+  color: #9e9e9e;
+}
+
+.status-box.empty img {
+  width: 58px;
+  height: 58px;
+}
+
+.status-box.empty .left-justify {
+  margin-right: 60%;
+  align-items: flex-start;
+}
+
+.status-box.empty .left-justify img {
+  margin-right: 15px;
 }
 
 .text-bold {

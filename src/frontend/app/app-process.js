@@ -1,11 +1,13 @@
 const { BrowserWindow, app } = require("electron");
 
-var appUtils = require("./appUtils");
-var User = require("../../model/user");
-var Block = require("../../model/block");
-var Tier = require("../../model/tier");
-var File = require("../../model/file");
-var Download = require("../../model/download");
+const appUtils = require("./appUtils");
+const User = require("../../model/user");
+const Plan = require("../../model/plan");
+const Block = require("../../model/block");
+const Tier = require("../../model/tier");
+const File = require("../../model/file");
+const Download = require("../../model/download");
+
 let win;
 let relaunchFunction;
 
@@ -53,9 +55,9 @@ function hideAppWindow() {
   return false;
 }
 
-function sendMessage(channel, arg) {
+function sendMessage(channel, ...args) {
   if (win) {
-    win.webContents.send(channel, arg);
+    win.webContents.send(channel, ...args);
     return true;
   }
   return false;
@@ -78,6 +80,17 @@ module.exports = {
         return User.updateOne(query, doc, cb);
       }
     },
+    Plan: {
+      findById: (id, projection, callback) => {
+        return Plan.findById(id, projection, callback);
+      },
+      findOne: (query, projection, callback) => {
+        return Plan.findOne(query, projection, callback);
+      },
+      updateOne: (query, doc, cb) => {
+        return Plan.updateOne(query, doc, cb);
+      }
+    },
     Block: {
       find: (query, projection, callback) => {
         return Block.find(query, projection, callback);
@@ -87,8 +100,8 @@ module.exports = {
       }
     },
     Tier: {
-      findOne: (query, projection, callback) => {
-        return Tier.findOne(query, projection, callback);
+      findById: (id, projection, callback) => {
+        return Tier.findById(id, projection, callback);
       }
     },
     File: {
@@ -97,9 +110,18 @@ module.exports = {
       },
       aggregate: (aggregations, callback) => {
         return File.aggregate(aggregations, callback);
+      },
+      updateOne: (query, doc, cb) => {
+        return File.updateOne(query, doc, cb);
+      },
+      updateMany: (query, doc, cb) => {
+        return File.updateMany(query, doc, cb);
       }
     },
     Download: {
+      find: (query, projection, callback) => {
+        return Download.find(query, projection, callback);
+      },
       findOne: (query, projection, callback) => {
         return Download.findOne(query, projection, callback);
       },

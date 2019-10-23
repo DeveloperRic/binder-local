@@ -2,6 +2,7 @@
 app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
   const G = $rootScope.G;
   const User = G.clientModels.User;
+  const Plan = G.clientModels.Plan;
   var stripe;
 
   // ---------------------------------------
@@ -56,10 +57,23 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
       if (G.user.plan && !G.user.plan.expired) {
         return G.notifyError("You already have an active plan");
       }
-      billing.stage = "info";
-      billing.plan = plan;
-      billing.visible = true;
-      billing.status = "";
+      G.notifyLoading(true);
+      User.findOne({ _id: G.user._id }, { billing: 1 }, (err, user) => {
+        G.notifyLoading(false);
+        if (err || !user) {
+          G.notifyError("Failed to load billing info", err);
+        } else {
+          billing.stage = "info";
+          billing.plan = plan;
+          billing.args = {
+            ...billing.args,
+            ...JSON.parse(JSON.stringify(user.billing))
+          };
+          billing.visible = true;
+          billing.status = "";
+        }
+        $scope.$apply();
+      });
     }
   });
 
@@ -69,13 +83,13 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
     stage: "info",
     status: "waiting",
     args: {
-      firstName: "Victor",
-      lastName: "Olaitan",
+      firstName: "",
+      lastName: "",
       address: {
-        line1: "1 millcreek court",
+        line1: "",
         line2: "",
-        city: "ottawa",
-        postal_code: "k1s 5b7",
+        city: "",
+        postal_code: "",
         country: "Canada"
       }
     },
@@ -85,6 +99,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
       billing.visible = false;
     },
     continueToStripe: () => {
+      G.notifyLoading(true);
       billing.error = null;
       let checkTrimmedContent = obj => {
         for (const key in obj) {
@@ -98,18 +113,29 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           }
         }
       };
-      if (checkTrimmedContent(billing.args)) return;
+      if (checkTrimmedContent(billing.args)) {
+        return (G.notifyLoading(false));
+      }
       if (
         !/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(
           billing.args.address.postal_code
         )
       ) {
+        G.notifyLoading(false);
         return (billing.error = {
           cause: "postal-code",
           msg: "Invalid postal code"
         });
       }
-      billing.stage = "stripe";
+      User.updateOne({ _id: G.user._id }, { billing: billing.args }, err => {
+        G.notifyLoading(false);
+        if (err) {
+          billing.error = { msg: "Couldn't update your billing info" };
+        } else {
+          billing.stage = "stripe";
+        }
+        $scope.$apply();
+      });
     },
     checkout: tokenId => {
       if (billing.status == "loading") return;
@@ -133,7 +159,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           },
           G.oauthHeader()
         )
-        .then(res => onPaymentSuccess())
+        .then(res => updateUserAndPlan())
         .catch(err => {
           if (err.status == 402) {
             err.data = err.data.data;
@@ -144,31 +170,10 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
                 if (result.error) {
                   billing.status = "";
                   delete err.data.reattempt;
-                  G.notifyError(
-                    "Your card was declined by your bank for invalid authentication",
-                    err
-                  );
+                  // likely invalid authentication
+                  G.notifyError("Your card was declined by your bank", err);
                 } else {
-                  User.updateOne(
-                    { _id: G.user._id },
-                    {
-                      "plan.expired": false,
-                      "plan.log.purchasedDate": result.paymentIntent.created || Date.now()
-                    },
-                    err => {
-                      if (err) {
-                        return G.notifyError(
-                          [
-                            "We couldn't update your user info. ",
-                            "Please ensure you are connected to the internet while using Binder. ",
-                            "Your account will be updated soon in the cloud."
-                          ],
-                          err
-                        );
-                      }
-                      onPaymentSuccess();
-                    }
-                  );
+                  updateUserAndPlan(err.data.plan, result);
                 }
                 $scope.$apply();
               });
@@ -179,6 +184,54 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           console.error(err);
           billing.status = "error";
         });
+      function updateUserAndPlan(plan, result) {
+        User.findOne({ _id: G.user._id }, { plan: 1 }, (err, user) => {
+          if (err) {
+            G.notifyError(
+              [
+                "We couldn't update your user info. ",
+                "Please ensure you are connected to the internet while using Binder. ",
+                "Your account will be updated soon in the cloud."
+              ],
+              err
+            );
+            return $scope.$apply();
+          }
+          if (!user) {
+            G.notifyError(
+              [
+                "Something has gone wrong while syncing your data. ",
+                "Your plan has been purchased and will be activated soon in the cloud."
+              ],
+              err
+            );
+            return $scope.$apply();
+          }
+          Plan.updateOne(
+            { _id: user.plan },
+            {
+              expired: false,
+              "log.activatedDate": result
+                ? result.paymentIntent.created || Date.now()
+                : Date.now()
+            },
+            err => {
+              if (err) {
+                G.notifyError(
+                  [
+                    "We couldn't update your user info. ",
+                    "Please ensure you are connected to the internet while using Binder. ",
+                    "Your account will be updated soon in the cloud."
+                  ],
+                  err
+                );
+                return $scope.$apply();
+              }
+              onPaymentSuccess();
+            }
+          );
+        });
+      }
       function onPaymentSuccess() {
         billing.status = "success";
         $http

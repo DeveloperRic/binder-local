@@ -101,14 +101,14 @@ block component
                   tr
                     td(colspan="2")
                       .input
-                        input(type='text', ng-model='billing.args.address.line1', required, placeholder='Address 1')
+                        input(type='text', ng-model='billing.args.address.line1', required, placeholder='Address line 1')
                         .label-floor
                   tr
                     td.address2(colspan="2")
                       .input
-                        input(type='text', ng-model='billing.args.address.line2', placeholder='Address 2')
+                        input(type='text', ng-model='billing.args.address.line2', placeholder='Address line 2')
                         .label-floor
-                      code.color-muted OPTIONAL
+                      code.color-muted optional
                   tr
                     td
                       .input
@@ -116,7 +116,7 @@ block component
                         .label-floor
                     td
                       .input
-                        input(type='text', ng-model='billing.args.address.postal_code', required, placeholder='Post code', ng-class="{'border-color:red': billing.error.cause=='postal-code'}")
+                        input(type='text', ng-model='billing.args.address.postal_code', required, placeholder='Postal code', ng-class="{'border-color:red': billing.error.cause=='postal-code'}")
                         .label-floor
                   tr
                     td

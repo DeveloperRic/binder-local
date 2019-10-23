@@ -74,7 +74,7 @@ var downloadSchema = mongoose.Schema({
     min: 0,
     required: true
   },
-  //TODO expires on should have a default and validator
+  //NOTE expires on should have a default and validator
   expiresOn: {
     type: Number,
     required: true,

@@ -1,5 +1,3 @@
-/* TODO empty list graphic for all lists in the electron app */
-
 #explore {
   display: flex;
   flex-direction: column;
@@ -117,4 +115,11 @@ body.darkmode #explore .list .item:hover {
 
 #explore .list .file .name i {
   color: #80cbc4;
+}
+
+#explore .list .file .name.color-red {
+  font-style: italic;
+}
+#explore .list .file .name.color-red i {
+  color: #f44336;
 }

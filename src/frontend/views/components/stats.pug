@@ -50,6 +50,10 @@ block component
           h3 Update ratio
           | {{speeds.changes}}
       br
+      .status-box.empty.w3-animate-opacity(ng-show="actives.folders.length == 0 && actives.files.length == 0")
+        .left-justify
+            img(ng-src="../img/empty-list.png")
+            | Nothing to show
       ng-show(ng-show="actives.folders.length > 0")
         br
         .actives
@@ -62,12 +66,13 @@ block component
             button.color-accent(ng-click="filter.set(folder)")
               | View stats
             hr
-      br
-      .actives
-        h2 Most active files
+      ng-show(ng-show="actives.files.length > 0")
         br
-        .active.file.w3-animate-opacity(ng-repeat="file in actives.files")
-          div
-            i.material-icons insert_drive_file
-            | {{file.path}}
-          hr
+        .actives
+          h2 Most active files
+          br
+          .active.file.w3-animate-opacity(ng-repeat="file in actives.files")
+            div
+              i.material-icons insert_drive_file
+              | {{file.path}}
+            hr
