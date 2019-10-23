@@ -532,11 +532,14 @@ function getUser(next) {
         profile: {
           nickname: profile.nickname,
           picture: profile.picture
+        },
+        billing: {
+          firstName: profile.nickname
         }
       };
       User.create(appendSecurityKey(user), (err, _user) => {
         if (err) return next(null, err);
-        console.log("Got user");
+        console.log("Created user");
         user._id = _user._id;
         next(user);
       });

@@ -24,44 +24,47 @@ const userSchema = mongoose.Schema({
     required: true
   },
   billing: {
-    firstName: {
-      type: String,
-      trim: true,
-      default: ""
-    },
-    lastName: {
-      type: String,
-      trim: true,
-      default: ""
-    },
-    address: {
-      line1: {
+    type: {
+      firstName: {
         type: String,
         trim: true,
         default: ""
       },
-      line2: {
+      lastName: {
         type: String,
         trim: true,
         default: ""
       },
-      city: {
-        type: String,
-        trim: true,
-        default: ""
-      },
-      postal_code: {
-        type: String,
-        trim: true,
-        validate: v => /^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(v),
-        default: ""
-      },
-      country: {
-        type: String,
-        trim: true,
-        enum: ["Canada"]
+      address: {
+        line1: {
+          type: String,
+          trim: true,
+          default: ""
+        },
+        line2: {
+          type: String,
+          trim: true,
+          default: ""
+        },
+        city: {
+          type: String,
+          trim: true,
+          default: ""
+        },
+        postal_code: {
+          type: String,
+          trim: true,
+          validate: v => /^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(v),
+          default: ""
+        },
+        country: {
+          type: String,
+          trim: true,
+          enum: ["Canada"]
+        }
       }
-    }
+    },
+    default: {}
   },
   stripe_customer_id: {
     type: String

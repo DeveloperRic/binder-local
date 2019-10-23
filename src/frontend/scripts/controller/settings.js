@@ -114,8 +114,12 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
       lastName: ""
     },
     refresh: () => {
-      name.old.firstName = G.user.billing.firstName;
-      name.old.lastName = G.user.billing.lastName;
+      try {
+        name.old.firstName = G.user.billing.firstName;
+        name.old.lastName = G.user.billing.lastName; 
+      } catch (err) {
+        console.error(err);
+      }
     },
     submitUpdate: () => {
       if (name.status == "updating") return;
@@ -156,7 +160,11 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
       country: "Canada"
     },
     refresh: () => {
-      address.oldAddress = Object.values(G.user.billing.address);
+      try {
+        address.oldAddress = Object.values(G.user.billing.address);
+      } catch (err) {
+        console.error(err);
+      }
     },
     submitUpdate: () => {
       if (address.status == "updating") return;
