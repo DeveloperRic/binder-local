@@ -147,6 +147,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           ? 4
           : 12;
       billing.status = "loading";
+      console.log(G.user._id.toString());
       $http
         .post(
           `${G.API_DOMAIN}/client/plan/purchase`,

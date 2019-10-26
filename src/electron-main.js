@@ -523,8 +523,15 @@ function getUser(next) {
   User.findOne({ email: profile.email }, { _id: 1, plan: 1 }, (err, user) => {
     if (err) return next(null, err);
     if (user) {
-      console.log("Got user");
-      next(user);
+      User.updateOne(
+        { _id: user._id },
+        { email_verified: profile.email_verified },
+        err => {
+          if (err) return next(null, err);
+          console.log("Got user (verified=" + profile.email_verified + ")");
+          next(user);
+        }
+      );
     } else {
       user = {
         email: profile.email,
