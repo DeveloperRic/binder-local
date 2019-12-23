@@ -54,6 +54,7 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
                 {
                   $match: {
                     owner: G.toObjectId(G.user._id),
+                    plan: G.toObjectId(G.user.plan._id),
                     localPath: { $regex: regex.source, $options: regex.flags },
                     deleted: false
                   }
@@ -513,7 +514,7 @@ app.controller("exploreCtrl", function($scope, $rootScope, $interval) {
         .catch(err => catchErr(err, stage));
     });
     $scope.$apply();
-  });
+  }, "plan._id");
 
   function addFileContextMenu(f) {
     let fileIsIgnored = !G.ipcRenderer.sendSync(

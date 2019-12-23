@@ -6,8 +6,9 @@ let spider;
 /**
  * Starts the Spider
  * @param {"ObjectId"} uid
+ * @param {"ObjectId"} planId
  */
-function startSpider(uid, uploadService) {
+function startSpider(uid, planId, uploadService) {
   return new Promise((resolve, reject) => {
     let start = () => {
       spider
@@ -23,6 +24,7 @@ function startSpider(uid, uploadService) {
     } else {
       Spider({
         uid,
+        planId,
         firstDelay: 60 * 1000, // wait 1 min first
         taskDelay: 5 * 60 * 1000, // every 5 mins
         uploadService

@@ -1,7 +1,7 @@
 {
   "name": "binder-local",
   "productName": "Binder",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Backup files to the cloud",
   "homepage": "https://binderapp.xyz",
   "main": "src/electron-main.js",
@@ -48,6 +48,13 @@
       "publish": [
         "github"
       ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office"
     }
   },
   "config": {
@@ -98,6 +105,7 @@
     "path-parse": "^1.0.6",
     "path-to-regexp": "^3.0.0",
     "request": "^2.88.0",
+    "request-promise": "^4.2.5",
     "speedtest-net": "^1.5.1",
     "uuid": "^3.3.2",
     "winston": "^3.2.1"

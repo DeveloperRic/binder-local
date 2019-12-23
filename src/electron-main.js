@@ -52,6 +52,8 @@ let initialised = false;
 // TODO fix problems listed in VSCode problems tab (ctrl+`)
 // TODO delete files in /data before publishing updates
 
+// TODO client should request /provision when necessary
+
 function showWindow(onAuthenticated) {
   authService
     .refreshTokens()
@@ -379,6 +381,7 @@ function declareIpcChannels() {
         event.reply("spider-directoryStore-res", directoryStore);
       })
       .catch(err => {
+        console.log(err);
         event.reply("spider-directoryStore-err", err);
       });
   });
@@ -544,23 +547,27 @@ function getUser(next) {
           firstName: profile.nickname
         }
       };
-      User.create(appendSecurityKey(user), (err, _user) => {
-        if (err) return next(null, err);
-        console.log("Created user");
-        user._id = _user._id;
-        next(user);
-      });
+      appendSecurityKey(user)
+        .then(user => {
+          User.create(user, (err, _user) => {
+            if (err) return next(null, err);
+            console.log("Created user");
+            user._id = _user._id;
+            next(user);
+          });
+        })
+        .catch(err => next(null, err));
     }
   }).lean(true);
 }
 
 function startServices({ _id: uid, plan: planId }, next) {
-  Plan.findById(planId, { expired: 1 })
+  Plan.findById(planId, { active: 1 }).lean(true)
     .then(plan => {
       fs.mkdirSync(resolveDir("data"), { recursive: true });
-      if (!plan || plan.expired) {
+      if (!plan || !plan.active) {
         console.log(
-          "User's plan has expired, upload, download & spider services not started"
+          "User's plan is inactive, upload, download & spider services not started"
         );
         return next();
       }
@@ -616,7 +623,7 @@ function startServices({ _id: uid, plan: planId }, next) {
               });
               //-----------------------------
               spiderService
-                .startSpider(uid, uploadService)
+                .startSpider(uid, planId, uploadService)
                 .then(() => {
                   console.log("Spider started successfully");
                   internetService.start(connectionCallback);

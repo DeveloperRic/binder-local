@@ -8,10 +8,6 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
     save: saveSettings
   } = G.require("services/localSettings");
   const { checkAutoLauncher } = G.require("prodVariables");
-  const { hideAppWindow, showAppWindow } = G.require(
-    "frontend/app/app-process"
-  );
-  const { createAuthWindow } = G.require("frontend/app/auth-process");
 
   // ---------------------------------------
 
@@ -214,13 +210,6 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
   });
 
   var plan = ($scope.plan = {
-    authorize: callback => {
-      hideAppWindow();
-      createAuthWindow(authorized => {
-        showAppWindow();
-        callback(authorized);
-      });
-    },
     cancel: {
       cycle: "unknown",
       submit: () => {
@@ -233,7 +222,7 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
           confirmed => {
             if (!confirmed) return;
             G.notifyLoading(true);
-            plan.authorize(authorized => {
+            G.authorize(authorized => {
               if (!authorized) {
                 G.notifyLoading(false);
                 G.notifyError([
@@ -274,7 +263,7 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
           confirmed => {
             if (!confirmed) return;
             G.notifyLoading(true);
-            plan.authorize(authorized => {
+            G.authorize(authorized => {
               if (!authorized) {
                 G.notifyLoading(false);
                 G.notifyError([
@@ -315,7 +304,7 @@ app.controller("settingsCtrl", function($scope, $rootScope, $interval, $http) {
           confirmed => {
             if (!confirmed) return;
             G.notifyLoading(true);
-            plan.authorize(authorized => {
+            G.authorize(authorized => {
               if (!authorized) {
                 G.notifyLoading(false);
                 G.notifyError([

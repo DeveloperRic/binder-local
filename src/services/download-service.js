@@ -130,11 +130,11 @@ function init(uid, planId, uploadPaused, uploadWaiting, uploadResume) {
 
 function finaliseInit(planId) {
   return new Promise((resolve, reject) => {
-    Plan.findById(planId, { expired: 1, tier: 1 }, (err, plan) => {
+    Plan.findById(planId, { active: 1, tier: 1 }, (err, plan) => {
       if (err) return reject(err);
-      if (!plan || plan.expired) {
+      if (!plan || !plan.active) {
         return reject(
-          new Error("User doesn't have a plan / user's plan has expired")
+          new Error("User doesn't have a plan / user's plan is inactive")
         );
       }
       Tier.findById(plan.tier, { retrieveSpeed: 1 }, (err, tier) => {
@@ -539,7 +539,7 @@ function resume() {
         }
         // verify the user's plan hasn't epired
         // if it has block future processing
-        return verifyPlanNotExpired()
+        return verifyPlanActive()
           .catch(err => console.error(err)) // errors aren't a worry here
           .then(resolve);
       }
@@ -876,23 +876,17 @@ function releaseFile(fileDat, filePath) {
 }
 
 /**
- * This function will query if the user's plan has expired.
- * If it has, future processing will be blocked and the promise rejected.
+ * This function will query if the user's plan is inactive.
+ * If it is, future processing will be blocked and the promise rejected.
  * Otherwise, the promise will resolve.
  * NOTE: the function will also block processing if an error occurs
  */
-function verifyPlanNotExpired() {
+function verifyPlanActive() {
   return new Promise((resolve, reject) => {
-    Plan.findOne({ owner: userId, expired: false }, { _id: 1 }, (err, plan) => {
+    Plan.findOne({ owner: userId, active: true }, { _id: 1 }, (err, plan) => {
       if (err) {
         allowProcessing = false;
         return reject(err);
-      }
-      if (!plan) {
-        allowProcessing = false;
-        return reject(
-          new Error("invalid initialisation of userId (user not found)")
-        );
       }
       if (!plan) {
         allowProcessing = false;

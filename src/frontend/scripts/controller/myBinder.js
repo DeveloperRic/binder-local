@@ -2,8 +2,10 @@
 app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
   const ip = require("ip");
   const G = $rootScope.G;
-  var Block = G.clientModels.Block;
-  var Tier = G.clientModels.Tier;
+  const { purchaseEndpoint } = G.paymentService;
+  const Block = G.clientModels.Block;
+  const Tier = G.clientModels.Tier;
+  var stripe;
 
   // ---------------------------------------
 
@@ -81,9 +83,200 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
     invoiceHistory: []
   });
 
+  var planList = [
+    {
+      id: "BASIC",
+      img: "3-ring-icon",
+      name: "3-ring",
+      size: "100 Gb",
+      price: 5,
+      features: ["Archive at 50 GB/hr", "Retrieve at 25 GB/hr"],
+      cycle: "monthly",
+      unavailable: true
+    },
+    {
+      id: "MID",
+      img: "4-ring-icon",
+      name: "4-ring",
+      size: "300 Gb",
+      price: 7,
+      features: ["Archive at 150 GB/hr", "Retrieve at 50 GB/hr", "47% cheaper"],
+      cycle: "monthly"
+    },
+    {
+      id: "TOP",
+      img: "5-ring-icon",
+      name: "5-ring",
+      size: "1000 Gb",
+      price: 20,
+      features: [
+        "Restore old file versions",
+        "Archive at 500 GB/hr",
+        "Retrieve at 250 GB/hr",
+        "40% cheaper"
+      ],
+      cycle: "monthly"
+    }
+  ];
+  var plans = ($scope.plans = {
+    list: planList,
+    selected: planList[1],
+    buyPlan: () => {
+      if (!G.user.email_verified) {
+        return G.notifyError(
+          "Please verify your email before purchasing a plan"
+        );
+      }
+      changes.modifyArgs = {
+        tier: plans.selected.id,
+        length:
+          plans.selected.cycle == "monthly"
+            ? 1
+            : plans.selected.cycle == "quaterly"
+            ? 4
+            : 12
+      };
+      changes.modifyPlan();
+    }
+  });
+
+  var changes = ($scope.changes = {
+    stage: "",
+    status: "",
+    days_left: -1,
+    overlayVisible: false,
+    stripeReady: false,
+    stripeCallback: null,
+    modifyArgs: {
+      tier: "",
+      length: 0
+    },
+    goBack: () => {
+      changes.stage = "";
+      changes.overlayVisible = false;
+    },
+    renew: updateCard => {
+      if (updateCard) {
+        changes.overlayVisible = true;
+        changes.stripeCallback = tokenId => {
+          changes.checkout({
+            renew: true,
+            tokenId
+          });
+        };
+        return (changes.stage = "stripe");
+      } else {
+        changes.checkout({ renew: true });
+      }
+    },
+    modifyPlan: () => {
+      if (changes.status != "") return;
+      changes.overlayVisible = true;
+      if (changes.stage == "") {
+        return (changes.stage = "plans");
+      } else if (changes.stage == "plans") {
+        changes.stripeCallback = tokenId => {
+          changes.checkout({
+            tier: changes.modifyArgs.tier,
+            length: changes.modifyArgs.length,
+            tokenId
+          });
+        };
+        return (changes.stage = "stripe");
+      }
+    },
+    checkout: (extraArgs = {}) => {
+      if (changes.status == "loading") return;
+      if (!changes.stripeReady) {
+        return G.notifyError("Our payment system is taking a while to start");
+      }
+      changes.overlayVisible = true;
+      changes.stage = "checkout";
+      changes.status = "loading";
+      purchaseEndpoint(
+        stripe,
+        {
+          userId: G.user._id,
+          useExistingAddress: true,
+          ...extraArgs
+        },
+        true,
+        {
+          onDeclined: err => {
+            if (err) {
+              changes.status = "";
+              G.notifyError("Your card was declined by your bank", err);
+            } else {
+              changes.status = "declined";
+            }
+            $scope.$apply();
+          },
+          onUpdateError: err => {
+            changes.status = "";
+            G.notifyError(
+              [
+                "Something's gone wrong while syncing your data. ",
+                "Your plan has been purchased and will be activated soon in the cloud."
+              ],
+              err
+            );
+            $scope.$apply();
+          },
+          onBeforeProvision: () => {
+            changes.status = "success";
+            $scope.$apply();
+          },
+          onProvisionError: err => {
+            changes.status = "";
+            G.notifyError(
+              [
+                "Something's gone wrong while provisioning your storage. ",
+                "Your plan has been purchased and will be provisioned soon in the cloud."
+              ],
+              err
+            );
+            $scope.$apply();
+          },
+          onUnknownError: err => {
+            console.error(err);
+            changes.status = "error";
+            $scope.$apply();
+          },
+          onSuccess: () => {
+            changes.status = "";
+            changes.restartCountdown = 10;
+            let countdownTask = $interval(() => {
+              if (--changes.restartCountdown == 0) {
+                $interval.cancel(countdownTask);
+                G.restart();
+              }
+            }, 1000);
+          }
+        }
+      );
+    },
+    refresh: expired => {
+      if (expired) {
+      }
+    }
+  });
+
   // ---------------------------------------
 
   stage.status = "loading";
+
+  G.initialiseStripe(
+    { elementId: "#card-element", cardErrorId: "card-errors" },
+    tokenId => changes.stripeCallback(tokenId)
+  )
+    .then(_stripe => {
+      stripe = _stripe;
+      changes.stripeReady = true;
+    })
+    .catch(err => {
+      stage.status = err;
+      return console.error(err);
+    });
 
   G.getUser(
     (err, user) => {
@@ -233,7 +426,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
         plan = $scope.plan = Object.assign(plan, {
           name: tier.name,
           cycle: planCycle,
-          nextPayment: "Unknown", // NOT ACCEPTABLE
+          nextPayment: "Unknown (error)", // NOT ACCEPTABLE
           invoiceHistory: []
         });
         let formatDate = date => {
@@ -258,7 +451,9 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
             let paymentIntents = [];
             // console.log(invoiceHistory);
             plan.invoiceHistory = invoiceHistory.map(invoice => {
-              paymentIntents.push(invoice.payment_intent);
+              if (invoice.payment_intent != null) {
+                paymentIntents.push(invoice.payment_intent);
+              }
               // console.log(invoice);
               return {
                 id: invoice.id,
@@ -268,6 +463,7 @@ app.controller("myBinderCtrl", function($scope, $rootScope, $http) {
                 card: {}
               };
             });
+            if (paymentIntents.length == 0) return resolve();
             $http
               .get(
                 `${G.API_DOMAIN}/client/plan/cardForInvoice`,

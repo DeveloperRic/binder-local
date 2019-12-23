@@ -432,6 +432,7 @@ app.controller("foldersCtrl", function($scope, $rootScope, $interval) {
         $scope.$apply(() => {
           stage.status = "error";
           if (args) {
+            console.log(args);
             G.notifyError(args[0], args[1]);
           }
         });

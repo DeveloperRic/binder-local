@@ -2,7 +2,7 @@
   -----------------------------------------------------------
 
   This file is used to coordinate constants and functions
-  implemented in both the upload and download services.
+  implemented in various services.
 
   NOTE:
   It is CRUITIAL NOT TO UPDATE ANYTHING HERE UNLESS
@@ -15,6 +15,7 @@
 
 const fs = require("fs");
 const mongoose = require("mongoose");
+const {getAccessToken} = require("./auth-service");
 
 /**
  * @returns {Promise<mongoose.ClientSession>}
@@ -141,6 +142,16 @@ function toObjectId(s) {
   return mongoose.Types.ObjectId(s.toString());
 }
 
+function oauthHeader(options) {
+  let header = {
+    headers: {
+      Authorization: `Bearer ${getAccessToken()}`
+    }
+  };
+  if (options) return Object.assign(header, options);
+  else return header;
+}
+
 module.exports = {
   beginSession,
   isLargeFile,
@@ -149,5 +160,6 @@ module.exports = {
   findCommonPrefix,
   normalisePath,
   regexEscape,
-  toObjectId
+  toObjectId,
+  oauthHeader
 };

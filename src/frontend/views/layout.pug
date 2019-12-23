@@ -4,8 +4,8 @@ html(lang="en", ng-app="app")
     meta(charset='UTF-8')
     meta(name='viewport', content='width=device-width, initial-scale=1.0')
     meta(http-equiv='X-UA-Compatible', content='ie=edge')
-    //- TODO remove localhost CSP when publishing http://localhost:3000
-    meta(http-equiv='Content-Security-Policy', content="script-src 'self' https://js.stripe.com 'unsafe-eval'; connect-src 'self' https://api.binderapp.xyz https://js.stripe.com")
+    //- TODO toggle localhost CSP when publishing 
+    meta(http-equiv='Content-Security-Policy', content="script-src 'self' https://js.stripe.com 'unsafe-eval'; connect-src 'self' https://api.binderapp.xyz https://js.stripe.com http://localhost:3000")
 
     title Binder
     
@@ -62,7 +62,7 @@ html(lang="en", ng-app="app")
         a(ng-click="G.switchStage('folders')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('folders')}")
           i.material-icons folder_open
           | Folders
-        a(ng-click="G.switchStage('myBinder')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('myBinder')}")
+        a(ng-click="G.switchStage('myBinder')", ng-if="G.user.plan || G.user.plan_inactive", ng-class="{'color-accent': G.stageStack.current().startsWith('myBinder')}")
           i.material-icons cloud_queue
           | My Binder
         a(ng-click="G.switchStage('stats')", ng-if="G.user.plan", ng-class="{'color-accent': G.stageStack.current().startsWith('stats')}")
@@ -74,12 +74,12 @@ html(lang="en", ng-app="app")
         a(ng-click="G.switchStage('help')", ng-class="{'color-accent': G.stageStack.current().startsWith('help')}")
           i.material-icons help_outline
           | Help
-        a(ng-click="G.switchStage('plans')", ng-if="!G.user.plan_expired", ng-class="{'color-accent': G.stageStack.current().startsWith('plans')}")
+        a(ng-click="G.switchStage('plans')", ng-if="!G.user.plan_inactive", ng-class="{'color-accent': G.stageStack.current().startsWith('plans')}")
           i.material-icons dns
           | Plans
-        a(ng-click="G.switchStage('renew')", ng-if="G.user.plan_expired", ng-class="{'color-accent': G.stageStack.current().startsWith('renew')}")
-          i.material-icons autorenew
-          | Renew plan
+        //- a(ng-click="G.switchStage('renew')", ng-if="G.user.plan_inactive", ng-class="{'color-accent': G.stageStack.current().startsWith('renew')}")
+        //-   i.material-icons autorenew
+        //-   | Renew plan
         a(ng-click="G.switchStage('settings')", ng-class="{'color-accent': G.stageStack.current().startsWith('settings')}")
           i.material-icons settings
           | Settings

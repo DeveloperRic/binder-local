@@ -29,6 +29,10 @@ var fileSchema = mongoose.Schema({
     index: true,
     immutable: true
   },
+  plan: {
+    type: "ObjectId",
+    required: true
+  },
   block: {
     type: "ObjectId",
     required: true

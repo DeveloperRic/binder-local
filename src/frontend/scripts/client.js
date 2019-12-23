@@ -12,16 +12,22 @@ WHERE CONSTANTS, STATE_VARS AND COMMONLY-USED FUNCTIONS
 WILL BE HELD.
 */
 
-app.run(function($rootScope, $cookies, $interval) {
+app.run(function($rootScope, $cookies, $interval, $http) {
   const { remote, ipcRenderer, shell } = require("electron");
-  const { getAccessToken, getProfile } = remoteRequire("services/auth-service");
-  const { createLogoutWindow } = remoteRequire("frontend/app/auth-process");
-  const { regexEscape, toObjectId, beginSession } = remoteRequire(
+  const { getProfile } = remoteRequire("services/auth-service");
+  const { createLogoutWindow, createAuthWindow } = remoteRequire(
+    "frontend/app/auth-process"
+  );
+  const { regexEscape, toObjectId, beginSession, oauthHeader } = remoteRequire(
     "services/coordination"
   );
-  const { clientModels, relaunch, getViewComponentUrl } = remoteRequire(
-    "frontend/app/app-process"
-  );
+  const {
+    clientModels,
+    relaunch,
+    getViewComponentUrl,
+    hideAppWindow,
+    showAppWindow
+  } = remoteRequire("frontend/app/app-process");
   const {
     DEV_MODE,
     API_DOMAIN,
@@ -30,8 +36,10 @@ app.run(function($rootScope, $cookies, $interval) {
   } = remoteRequire("prodVariables");
   const User = clientModels.User;
   const Plan = clientModels.Plan;
+  const Block = clientModels.Block;
   const stageStack = [];
   let stageStackIndex = -1;
+  const stripePublishableKey = "pk_test_fX7mdGyHoDRM5jd28IL6nmzF00pXMoMcT9";
   const G = ($rootScope.G = {
     remote,
     ipcRenderer,
@@ -48,7 +56,7 @@ app.run(function($rootScope, $cookies, $interval) {
     API_DOMAIN,
     LOCAL_SETTINGS_PATH,
     resolveDir,
-    stripePublishableKey: "pk_test_fX7mdGyHoDRM5jd28IL6nmzF00pXMoMcT9",
+    paymentService: { purchaseEndpoint },
     getUser,
     user: {},
     profile: getProfile(),
@@ -92,8 +100,17 @@ app.run(function($rootScope, $cookies, $interval) {
     toObjectId,
     beginSession,
     dateToTime,
+    authorize,
+    initialiseStripe,
     refreshCtrl: () => {}
   });
+  function authorize(callback) {
+    hideAppWindow();
+    createAuthWindow(authorized => {
+      showAppWindow();
+      callback(authorized);
+    });
+  }
   function switchStage(stage, ...args) {
     if (stageStackIndex >= 0 && stageStack[stageStackIndex].id == stage) {
       return;
@@ -229,7 +246,9 @@ app.run(function($rootScope, $cookies, $interval) {
       let exclude = proj.startsWith("-");
       if (exclude) proj = proj.substr(1);
       if (proj.startsWith("plan.")) {
-        hasExcludedPlan = hasExcludedPlan || exclude;
+        if (!hasExcludedPlan && exclude) {
+          hasExcludedPlan = true;
+        }
         planProjection[proj.substr(5)] = exclude ? 0 : 1;
       } else {
         projection[proj] = exclude ? 0 : 1;
@@ -237,7 +256,7 @@ app.run(function($rootScope, $cookies, $interval) {
     });
     projection.plan = 1;
     if (!hasExcludedPlan) {
-      planProjection.expired = 1;
+      planProjection.active = 1;
     }
     User.findOne({ email: G.profile.email }, projection, (err, user) => {
       if (err) return callback(err);
@@ -250,17 +269,38 @@ app.run(function($rootScope, $cookies, $interval) {
       user._id = user._id.toString();
       if (user.plan) {
         Plan.findOne(
-          { _id: user.plan, expired: false },
+          { _id: user.plan, active: true },
           planProjection,
           (err, plan) => {
             if (err) return callback(err);
             user.plan = plan;
             if (!plan) {
-              user.plan_expired = true;
+              user.plan_inactive = true;
+              user.inactive_plan = user.plan;
+              callback(false, user);
+            } else {
+              Block.find(
+                {
+                  plan: plan._id,
+                  provisioned: false
+                },
+                { _id: 1 },
+                (err, blocks) => {
+                  if (err) return callback(err);
+                  if (blocks.length > 0) {
+                    user.plan_inactive = true;
+                    user.awaiting_provision = true;
+                    user.inactive_plan = user.plan;
+                    user.plan = null;
+                  }
+                  callback(false, user);
+                }
+              )
+                .limit(1)
+                .lean(true);
             }
-            callback(false, user);
           }
-        );
+        ).lean(true);
       } else {
         callback(false, user);
       }
@@ -284,15 +324,6 @@ app.run(function($rootScope, $cookies, $interval) {
   }
   function remoteRequire(module) {
     return remote.require("./" + module);
-  }
-  function oauthHeader(options) {
-    let header = {
-      headers: {
-        Authorization: `Bearer ${getAccessToken()}`
-      }
-    };
-    if (options) return Object.assign(header, options);
-    else return header;
   }
   // $cookies.put("useDarkModeTheme", true);
   $rootScope.useDarkModeTheme = !!$cookies.get("useDarkModeTheme");
@@ -336,6 +367,99 @@ app.run(function($rootScope, $cookies, $interval) {
     if (options) {
       G.popup = Object.assign(G.popup, options);
     }
+  }
+  /**
+   * Initialises Stripe elements and sets up payment input
+   * @param {{elementId: string, errorId: string}} elementInfo for example "#card-element" and "#card-errors"
+   * @param {function(string)} paymentFunction tokenId is sent here
+   */
+  function initialiseStripe({elementId, cardErrorId}, paymentFunction) {
+    return new Promise((resolve, reject) => {
+      let stripe;
+      try {
+        stripe = Stripe(stripePublishableKey);
+      } catch (error) {
+        return reject(err);
+      }
+
+      var elements = stripe.elements();
+
+      // Custom styling can be passed to options when creating an Element.
+      // (Note that this demo uses a wider set of styles than the guide below.)
+      var cardElementStyle = {
+        base: {
+          color: "#32325d",
+          fontFamily: '"Helvetica Neue", Helvetica, sans-serif',
+          fontSmoothing: "antialiased",
+          fontSize: "16px",
+          "::placeholder": {
+            color: "#aab7c4"
+          }
+        },
+        invalid: {
+          color: "#fa755a",
+          iconColor: "#fa755a"
+        }
+      };
+
+      // Create an instance of the card Element.
+      var card = elements.create("card", {
+        hidePostalCode: true,
+        style: cardElementStyle
+      });
+
+      // Add an instance of the card Element into the `card-element` <div>.
+      card.mount(elementId);
+
+      let cardErrorElement = document.getElementById(cardErrorId.replace("#", ""));
+      if (!cardErrorElement) {
+        console.error("Failed to get card-error element in Stripe init");
+      }
+
+      // Handle real-time validation errors from the card Element.
+      card.addEventListener("change", event => {
+        if (event.error) {
+          cardErrorElement.textContent = event.error.message;
+        } else {
+          cardErrorElement.textContent = "";
+        }
+      });
+
+      // Handle form submission.
+      var form = document.getElementById("payment-form");
+      form.addEventListener("submit", event => {
+        console.log("submitting card details");
+        event.preventDefault();
+
+        stripe.createToken(card).then(result => {
+          if (result.error) {
+            // Inform the user if there was an error.
+            cardErrorElement.textContent = result.error.message;
+          } else {
+            // Send the token to your server.
+            stripeTokenHandler(result.token);
+          }
+        });
+      });
+
+      // Submit the form with the token ID.
+      function stripeTokenHandler(token) {
+        // Insert the token ID into the form so it gets submitted to the server
+        var form = document.getElementById("payment-form");
+        var hiddenInput = document.createElement("input");
+        hiddenInput.setAttribute("type", "hidden");
+        hiddenInput.setAttribute("name", "stripeToken");
+        hiddenInput.setAttribute("value", token.id);
+        form.appendChild(hiddenInput);
+
+        // Submit the form
+        // form.submit();
+        // test token = "tok_visa"
+        paymentFunction(token.id);
+      }
+
+      resolve(stripe);
+    });
   }
   function dateToTime(date) {
     let pad = (num, size) => ("000" + num).slice(size * -1);
@@ -391,5 +515,131 @@ app.run(function($rootScope, $cookies, $interval) {
     "Saturday",
     "Sunday"
   ];
-  G.switchStage(DEV_MODE ? "home" : "home");
+
+  G.switchStage(DEV_MODE ? "myBinder" : "home");
+
+  //
+  //
+  //
+
+  // ===================================================
+
+  /**
+   * Handles purchasing/renewing/modifying user's plan
+   * @param {"Stripe"} stripe
+   * @param {{
+   *  userId: string,
+   *  renewal: boolean,
+   *  tier: "tier id NOT _id",
+   *  form?: {email: string, firstName: string, lastName: string, address: {
+   *    line1: string, city: string, postal_code: string, country: string
+   *  }},
+   *  length: number,
+   *  tokenId?: "Stripe Token ID"
+   * }} options
+   * @param {boolean} provisionStorage do you want to call /provision ?
+   * @param callbacks
+   * @returns {Promise<null>} will always return data through callbacks; resolves in all cases
+   */
+  function purchaseEndpoint(
+    stripe,
+    { userId, renew, tier, form, length, tokenId, ...extraArgs },
+    provisionStorage,
+    {
+      onDeclined,
+      onUpdateError,
+      onProvisionError,
+      onBeforeProvision,
+      onUnknownError,
+      onSuccess
+    }
+  ) {
+    return new Promise((resolve, reject) => {
+      if (renew && (tier || form || length)) {
+        return reject(
+          "cannot supply new purchase arguments (tier/form/length) when renewing"
+        );
+      }
+      $http
+        .post(
+          `${API_DOMAIN}/client/plan/purchase`,
+          {
+            uid: userId,
+            renew,
+            tier,
+            form,
+            length,
+            token: tokenId,
+            ...extraArgs
+          },
+          oauthHeader()
+        )
+        .then(() => updateUserAndPlan())
+        .catch(err => {
+          if (err.status == 402) {
+            err.data = err.data.data;
+            if (err.data.status == "requires_payment_method") {
+              return resolve(onDeclined);
+            } else if (err.data.status == "requires_action") {
+              stripe.handleCardPayment(err.data.reattempt).then(result => {
+                if (result.error) {
+                  // likely invalid authentication
+                  delete err.data.reattempt;
+                  resolve(() => onDeclined(err));
+                } else {
+                  updateUserAndPlan(err.data.plan, result);
+                }
+              });
+              return;
+            }
+            delete err.data.reattempt;
+          }
+          reject(err);
+        });
+      function updateUserAndPlan(plan, result) {
+        User.findOne({ _id: G.user._id }, { plan: 1 }, (err, user) => {
+          if (err) {
+            return resolve(() => onUpdateError(err));
+          }
+          if (!user) {
+            return resolve(onUpdateError);
+          }
+          Plan.updateOne(
+            { _id: user.plan },
+            {
+              active: true,
+              "log.activatedDate": result
+                ? result.paymentIntent.created || Date.now()
+                : Date.now()
+            },
+            err => {
+              if (err) {
+                return resolve(() => onUpdateError(err));
+              }
+              onPaymentSuccess();
+            }
+          );
+        });
+      }
+      function onPaymentSuccess() {
+        if (provisionStorage) {
+          onBeforeProvision();
+          $http
+            .post(
+              `${G.API_DOMAIN}/client/plan/provision`,
+              {
+                uid: G.user._id
+              },
+              G.oauthHeader()
+            )
+            .then(() => resolve(onSuccess))
+            .catch(err => resolve(() => onProvisionError(err)));
+        } else {
+          resolve(onSuccess);
+        }
+      }
+    })
+      .then(callback => callback())
+      .catch(err => onUnknownError(err));
+  }
 });

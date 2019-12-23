@@ -1,6 +1,7 @@
 // plans ctrl
 app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
   const G = $rootScope.G;
+  const { purchaseEndpoint } = G.paymentService;
   const User = G.clientModels.User;
   const Plan = G.clientModels.Plan;
   var stripe;
@@ -54,7 +55,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           "Please verify your email before purchasing a plan"
         );
       }
-      if (G.user.plan && !G.user.plan.expired) {
+      if (G.user.plan && G.user.plan.active) {
         return G.notifyError("You already have an active plan");
       }
       G.notifyLoading(true);
@@ -93,6 +94,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
         country: "Canada"
       }
     },
+    stripeReady: false,
     error: null,
     cancel: () => {
       billing.plan = {};
@@ -114,7 +116,7 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
         }
       };
       if (checkTrimmedContent(billing.args)) {
-        return (G.notifyLoading(false));
+        return G.notifyLoading(false);
       }
       if (
         !/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(
@@ -139,6 +141,9 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
     },
     checkout: tokenId => {
       if (billing.status == "loading") return;
+      if (!billing.stripeReady) {
+        return G.notifyError("Our payment system is taking a while to start");
+      }
       billing.args.email = G.user.email;
       let billingLength =
         billing.plan.cycle == "monthly"
@@ -147,103 +152,58 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
           ? 4
           : 12;
       billing.status = "loading";
-      console.log(G.user._id.toString());
-      $http
-        .post(
-          `${G.API_DOMAIN}/client/plan/purchase`,
-          {
-            uid: G.user._id,
-            tier: billing.plan.id,
-            form: billing.args,
-            length: billingLength,
-            token: tokenId
-          },
-          G.oauthHeader()
-        )
-        .then(res => updateUserAndPlan())
-        .catch(err => {
-          if (err.status == 402) {
-            err.data = err.data.data;
-            if (err.data.status == "requires_payment_method") {
-              return (billing.status = "declined");
-            } else if (err.data.status == "requires_action") {
-              stripe.handleCardPayment(err.data.reattempt).then(result => {
-                if (result.error) {
-                  billing.status = "";
-                  delete err.data.reattempt;
-                  // likely invalid authentication
-                  G.notifyError("Your card was declined by your bank", err);
-                } else {
-                  updateUserAndPlan(err.data.plan, result);
-                }
-                $scope.$apply();
-              });
-              return;
+      purchaseEndpoint(
+        stripe,
+        {
+          userId: G.user._id,
+          tier: billing.plan.id,
+          form: billing.args,
+          length: billingLength,
+          token: tokenId
+        },
+        true,
+        {
+          onDeclined: err => {
+            if (err) {
+              billing.status = "";
+              G.notifyError("Your card was declined by your bank", err);
+            } else {
+              billing.status = "declined";
             }
-            delete err.data.reattempt;
-          }
-          console.error(err);
-          billing.status = "error";
-        });
-      function updateUserAndPlan(plan, result) {
-        User.findOne({ _id: G.user._id }, { plan: 1 }, (err, user) => {
-          if (err) {
+            $scope.$apply();
+          },
+          onUpdateError: err => {
+            billing.status = "";
             G.notifyError(
               [
-                "We couldn't update your user info. ",
-                "Please ensure you are connected to the internet while using Binder. ",
-                "Your account will be updated soon in the cloud."
-              ],
-              err
-            );
-            return $scope.$apply();
-          }
-          if (!user) {
-            G.notifyError(
-              [
-                "Something has gone wrong while syncing your data. ",
+                "Something's gone wrong while syncing your data. ",
                 "Your plan has been purchased and will be activated soon in the cloud."
               ],
               err
             );
-            return $scope.$apply();
-          }
-          Plan.updateOne(
-            { _id: user.plan },
-            {
-              expired: false,
-              "log.activatedDate": result
-                ? result.paymentIntent.created || Date.now()
-                : Date.now()
-            },
-            err => {
-              if (err) {
-                G.notifyError(
-                  [
-                    "We couldn't update your user info. ",
-                    "Please ensure you are connected to the internet while using Binder. ",
-                    "Your account will be updated soon in the cloud."
-                  ],
-                  err
-                );
-                return $scope.$apply();
-              }
-              onPaymentSuccess();
-            }
-          );
-        });
-      }
-      function onPaymentSuccess() {
-        billing.status = "success";
-        $http
-          .post(
-            `${G.API_DOMAIN}/client/plan/provision`,
-            {
-              uid: G.user._id
-            },
-            G.oauthHeader()
-          )
-          .then(res => {
+            $scope.$apply();
+          },
+          onBeforeProvision: () => {
+            billing.status = "success";
+            $scope.$apply();
+          },
+          onProvisionError: err => {
+            billing.status = "";
+            G.notifyError(
+              [
+                "Something's gone wrong while provisioning your storage. ",
+                "Your plan has been purchased and will be provisioned soon in the cloud."
+              ],
+              err
+            );
+            $scope.$apply();
+          },
+          onUnknownError: err => {
+            console.error(err);
+            billing.status = "error";
+            $scope.$apply();
+          },
+          onSuccess: () => {
             billing.status = "";
             billing.restartCountdown = 10;
             let countdownTask = $interval(() => {
@@ -252,12 +212,9 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
                 G.restart();
               }
             }, 1000);
-          })
-          .catch(err => {
-            console.error(err);
-            billing.status = "error";
-          });
-      }
+          }
+        }
+      );
     }
   });
 
@@ -265,86 +222,16 @@ app.controller("plansCtrl", function($scope, $rootScope, $http, $interval) {
 
   stage.status = "loading";
 
-  try {
-    stripe = Stripe(G.stripePublishableKey);
-  } catch (error) {
-    stage.status = error;
-    return console.error(error);
-    // return G.notifyError("Something went wrong", error);
-  }
-
-  var elements = stripe.elements();
-
-  // Custom styling can be passed to options when creating an Element.
-  // (Note that this demo uses a wider set of styles than the guide below.)
-  var style = {
-    base: {
-      color: "#32325d",
-      fontFamily: '"Helvetica Neue", Helvetica, sans-serif',
-      fontSmoothing: "antialiased",
-      fontSize: "16px",
-      "::placeholder": {
-        color: "#aab7c4"
-      }
-    },
-    invalid: {
-      color: "#fa755a",
-      iconColor: "#fa755a"
-    }
-  };
-
-  // Create an instance of the card Element.
-  var card = elements.create("card", {
-    hidePostalCode: true,
-    style: style
-  });
-
-  // Add an instance of the card Element into the `card-element` <div>.
-  card.mount("#card-element");
-
-  // Handle real-time validation errors from the card Element.
-  card.addEventListener("change", function(event) {
-    var displayError = document.getElementById("card-errors");
-    if (event.error) {
-      displayError.textContent = event.error.message;
-    } else {
-      displayError.textContent = "";
-    }
-  });
-
-  // Handle form submission.
-  var form = document.getElementById("payment-form");
-  form.addEventListener("submit", function(event) {
-    console.log("submitting");
-    event.preventDefault();
-
-    stripe.createToken(card).then(function(result) {
-      if (result.error) {
-        // Inform the user if there was an error.
-        var errorElement = document.getElementById("card-errors");
-        errorElement.textContent = result.error.message;
-      } else {
-        // Send the token to your server.
-        stripeTokenHandler(result.token);
-      }
+  G.initialiseStripe(document, "#card-element", billing.checkout)
+    .then(_stripe => {
+      stripe = _stripe;
+      billing.stripeReady = true;
+    })
+    .catch(err => {
+      stage.status = err;
+      return console.error(err);
+      // return G.notifyError("Something went wrong", error);
     });
-  });
-
-  // Submit the form with the token ID.
-  function stripeTokenHandler(token) {
-    // Insert the token ID into the form so it gets submitted to the server
-    var form = document.getElementById("payment-form");
-    var hiddenInput = document.createElement("input");
-    hiddenInput.setAttribute("type", "hidden");
-    hiddenInput.setAttribute("name", "stripeToken");
-    hiddenInput.setAttribute("value", token.id);
-    form.appendChild(hiddenInput);
-
-    // Submit the form
-    // form.submit();
-    // test token = "tok_visa"
-    billing.checkout(token.id);
-  }
 
   G.getUser((err, user) => {
     if (err || !user) {

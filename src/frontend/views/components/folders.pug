@@ -32,14 +32,17 @@ block component
         br
         button.border-accent(ng-click="G.switchStage('explore')")
           | Open file Explorer
-      br
+      p
+        | Binder uses folders to figure out which files to backup. 
+        | When you add a folder, all subfolders will also be added.
+      h3 Folders being checked:
       .folders(ng-show="folders.status == 'loading'")
         | !{horzSpinner}
       .folders(ng-show="folders.status == ''")
         //---------- add header
         button.add(ng-if="folders.addStatus==''", ng-click="folders.startAdd()")
           i.material-icons add_circle_outline
-          | Add
+          | Add a Folder
         button.add(ng-if="folders.addStatus=='input'", ng-click="folders.cancelAdd()")
           i.material-icons remove_circle_outline
           | Cancel Add

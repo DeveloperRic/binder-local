@@ -13,6 +13,11 @@ var blockSchema = mongoose.Schema({
     index: true,
     required: true
   },
+  plan: {
+    type: "ObjectId",
+    index: true,
+    required: true
+  },
   bucket: {
     type: "ObjectId",
     required: true
@@ -38,6 +43,10 @@ var blockSchema = mongoose.Schema({
     default: 0
   },
   binned: {
+    type: Boolean,
+    default: false
+  },
+  pendingDeletion: {
     type: Boolean,
     default: false
   },
@@ -151,6 +160,10 @@ var blockSchema = mongoose.Schema({
         default: 0,
         set: v => Math.floor(v)
       }
+    },
+    deleteByDate: {
+      type: Number,
+      min: 0
     }
   }
 });

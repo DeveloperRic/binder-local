@@ -14,7 +14,9 @@ const planSchema = mongoose.Schema({
   },
   stripe_subscription_id: {
     type: String,
-    required: true
+    required: true,
+    unique: true,
+    sparse: true
   },
   tier: {
     type: "ObjectId",
@@ -29,32 +31,33 @@ const planSchema = mongoose.Schema({
     min: 1,
     required: true
   },
-  expired: {
+  active: {
     type: Boolean,
     default: false
   },
   archived: {
     type: Boolean,
-    default: false,
-    validate: v => v
+    default: false
+    // validate: () => !!this.active
   },
   blocks: {
-    type: ["ObjectId"],
-    required: true,
-    validate: v => v.length > 0
+    type: ["ObjectId"]
+    // validate: v => v.length > 0
   },
   defaultBlockSize: {
     type: Number,
     min: 0,
     set: v => Math.ceil(v),
-    required: true
+    required: true,
+    validate: v => v >= 1073741824
   },
   maxTotalSize: {
     type: Number,
     min: 0,
     set: v => Math.ceil(v),
     required: true,
-    validate: v => v >= this.plan.defaultBlockSize
+    // validate: v => v >= this.defaultBlockSize
+    validate: v => v >= 1073741824
   },
   latestTotalSize: {
     type: Number,
@@ -88,18 +91,19 @@ const planSchema = mongoose.Schema({
             type: Number,
             min: 0,
             set: v => Math.ceil(v),
-            required: true
+            required: true,
+            validate: v => v >= 1073741824
           },
           renewal: {
             type: {
               oldPeriod: {
-                type: "ObjectId",
-                validate: () => !this.isFirstInSeries
+                type: "ObjectId"
+                // validate: () => !this.isFirstInSeries
               },
               reason: {
                 type: String,
-                trim: true,
-                validate: () => !this.isFirstInSeries
+                trim: true
+                // validate: () => !this.isFirstInSeries
               }
             }
           }
@@ -109,12 +113,16 @@ const planSchema = mongoose.Schema({
     },
     count: {
       type: Number,
-      min: 0
+      min: 0,
+      default: 0
     }
   },
   log: {
     type: {
       activatedDate: {
+        type: Number
+      },
+      deactivatedDate: {
         type: Number
       },
       canceledOn: {

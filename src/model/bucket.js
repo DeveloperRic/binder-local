@@ -1,23 +1,36 @@
-var mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
-var bucketSchema = mongoose.Schema({
-  id: {
-    type: String,
-    index: true,
-    trim: true,
-    unique: true,
-    uppercase: true
+const bucketSchema = mongoose.Schema(
+  {
+    id: {
+      type: String,
+      index: true,
+      trim: true,
+      unique: true,
+      uppercase: true,
+      required: true
+    },
+    name: {
+      type: String,
+      trim: true,
+      unique: true,
+      required: true
+    },
+    b2_bucket_id: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
+    lifecycleRules: {
+      deleteAfter: {
+        type: Number,
+        min: 1,
+        set: v => Math.floor(v),
+        default: 30
+      }
+    }
   },
-  name: {
-    type: String,
-    trim: true,
-    unique: true,
-    required: true
-  },
-  b2_bucket_id: {
-    type: String,
-    unique: true
-  }
-}, {id: false});
+  { id: false }
+);
 
-var Bucket = (module.exports = mongoose.model("Bucket", bucketSchema));
+module.exports = mongoose.model("Bucket", bucketSchema);

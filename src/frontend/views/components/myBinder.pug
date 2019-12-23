@@ -11,7 +11,7 @@ block component
       | If this error persits, try restarting the app.
       br
       | For more help, contact support.
-    .content.container(ng-if="stage.status == '' && G.user.plan")
+    .content.container(ng-show="stage.status == '' && (G.user.plan || G.user.plan_inactive)")
       h1 My Binder
       .space
         .graphic
@@ -19,7 +19,7 @@ block component
           .free-bar.bar
         .text {{(space.maxStorage - space.usedStorage).toFixed(1)}} Gb left
       br
-      .blocks
+      .blocks(ng-show="G.user.plan")
         h2 Blocks
         br
         .block.drop-shadow.w3-animate-opacity(ng-repeat="block in space.blocks", ng-class="{'merged': block.mergedInto}")
@@ -35,7 +35,8 @@ block component
       .plan
         h2 Your plan 
         p
-          code {{plan.name}}
+          code {{plan.name}} 
+          span.color-red(ng-show="G.user.plan_inactive") EXPIRED
         br
         h3 Billing
         .overview
@@ -46,6 +47,36 @@ block component
             i.material-icons fast_forward
             | Next payment: {{plan.nextPayment}}
         br
+        .expired(ng-show="G.user.plan_inactive")
+          h3.color-red
+            bold Your plan is inactive!
+          p
+            | The latest period of your plan has expired and we haven't received a payment for the next period.
+            br
+            | Please renew your plan using the button below. Otherwise, 
+            bold we will delete your data after 30 days.
+          p
+            i Your data will be deleted in  
+            code {{changes.days_left == 1 ? 'day' : 'days'}}
+          button.bg-accent.color-inverse(ng-click="changes.renew(true)", ng-disabled="changes.status != ''") RENEW NOW
+          br
+          br
+        .upgrade(ng-show="!G.user.plan_inactive")
+          h3 Upgrade/Downgrade your plan
+          p
+            | We encourage you to select the best plan type for your needs to reduce unecessary costs. 
+            | You may upgrade your plan at any time, however, in order to downgrade your plan, your usage must be within the limits of your desired plan type.
+          p
+            | For example, if you have a 4-ring binder (300gb) and you'd like to downgrade to a 3-ring binder (100gb). 
+            | Your space usage must be <= 100gb before you'll be allowed to make the change.
+          p
+            | Additionally, if you change your plan within the first 15 days, you won't be charged for your previous plan. 
+            | If you make a change after this date, you will be refunded the remaining time on your plan 
+            i and
+            |  charged the price of your new plan type.
+          button.border-accent(ng-click="changes.modifyPlan()", ng-disabled="changes.status != ''") Change your plan type
+          br
+          br
         h3 Recent payments
         p Up to 12 of the most recent payments we've received for this subscription.
         .status-box.empty.w3-animate-opacity(ng-show="plan.invoiceHistory.length == 0")
@@ -55,8 +86,85 @@ block component
         .bill.drop-shadow.w3-animate-opacity(ng-repeat="bill in plan.invoiceHistory")
           p
             b {{bill.formattedDate}}
-          p ${{bill.price}} Pre-authorized
+            i(ng-show="bill.price < 0")  Credited to you
+          p {{bill.price < 0 ? "-($" + -bill.price + ")" : "$" + bill.price}} Pre-authorized
           .payment
             img.card(ng-if="bill.card.img", ng-src="../img/{{bill.card.img}}.png")
             img.card(ng-if="!bill.card.img", ng-src="../img/credit-card.png")
             | {{bill.card.number}}
+      #checkout(ng-show="changes.overlayVisible", class="display:none", ng-class="{'w3-animate-top': true, 'display:flex': true}")
+        .blocks(ng-class="{'w3-animate-zoom': true}")
+          #plans.block.bg-primary.drop-shadow-strong(ng-show="changes.stage == 'plans'", ng-class="{'w3-animate-zoom': true}")
+            .tiers.row
+              .tier.col-md-4(ng-repeat="plan in plans.list", ng-class="{'unavailable': plan.unavailable}")
+                .tier-border(ng-click="plans.selected = (plan.unavailable ? plans.selected : plan)", ng-class="{true:'border-accent', false:'border-secondary'}[plans.selected==plan]")
+                  h3.best(ng-if="plan.id == 'MID'") Best
+                  h3.nickname
+                    img(ng-src="../img/plans/{{plan.img}}")
+                    | {{plan.name}}
+                  hr
+                  h1 {{plan.size}}
+                  .price= "${{plan.price}} / month"
+                  hr
+                  ul
+                    li(ng-repeat="feature in plan.features") {{feature}}
+            .billing.row
+              .options
+                button(ng-click="plans.selected.cycle = 'monthly'", ng-class="{'border-accent': plans.selected.cycle=='monthly'}")
+                  | Bill monthly = ${{plans.selected.price}}
+                button(ng-click="plans.selected.cycle = 'quaterly'", ng-class="{'border-accent': plans.selected.cycle=='quaterly'}")
+                  | Every 4 months = ${{plans.selected.price * 4}}
+                button(ng-click="plans.selected.cycle = 'annually'", ng-class="{'border-accent': plans.selected.cycle=='annually'}")
+                  | Annually = ${{plans.selected.price * 12}}
+              .summary
+                | CAD$ {{plans.selected.price * (plans.selected.cycle=='monthly' ? 1 : plans.selected.cycle=='quaterly' ? 4 : 12)}}
+                button.bg-accent.color-inverse(ng-click="plans.buyPlan()") Purchase
+            button.bg-secondary(ng-disabled="changes.status != ''", ng-click="changes.goBack()") Cancel
+          .block.bg-primary.drop-shadow-strong(ng-show="changes.stage == 'stripe' || changes.stage == 'checkout'", ng-class="{'w3-animate-zoom': true}")
+            form#payment-form(action='/charge', method='post', ng-class="{'paying-cursor': changes.status == 'loading'}")
+              .form-row
+                label(for='card-element') Credit or debit card
+                #card-element
+                  //- A Stripe Element will be inserted here.
+                  //- Used to display form errors.
+                #card-errors.color-red(role='alert')
+              .buttons
+                button.bg-secondary(ng-disabled="changes.status == 'loading' || changes.status == 'success' || changes.status == ''", ng-click="changes.goBack()") Cancel
+                button.bg-accent.color-inverse.checkout(type="submit", ng-disabled="changes.status == 'loading'")
+                  | Submit Payment
+                  i.material-icons https
+          .block.paying.bg-primary.drop-shadow-strong(ng-show="changes.stage == 'checkout'&&changes.status=='loading'", ng-class="{'w3-animate-zoom': true}")
+            div
+              | Confirming your payment
+              br
+              | This could take a little while
+            | !{horzSpinner}
+          .block.paying.warn.color-inverse.drop-shadow-strong(ng-show="changes.stage == 'checkout'&&changes.status=='auth'", ng-class="{'w3-animate-zoom': true}")
+            | Authenticating your card
+            | !{horzSpinner}
+          .block.paying.bg-primary.drop-shadow-strong(ng-show="changes.stage == 'checkout'&&changes.status=='success'", ng-class="{'w3-animate-zoom': true}")
+            div
+              | Payment successful!
+              br
+              | Provisioning your storage..
+            | !{horzSpinner}
+            i.material-icons.color-accent done
+          .block.paying.bg-primary.drop-shadow-strong(ng-show="changes.stage == 'checkout'&&changes.status==''&&changes.restartCountdown", ng-class="{'w3-animate-zoom': true}")
+            div
+              | Plan purchase completed
+              br
+              | Restarting in {{changes.restartCountdown}} {{changes.restartCountdown == 1 ? 'second' : 'seconds'}}..
+            | !{horzSpinner}
+            i.material-icons.color-accent done
+          .block.paying.error-popup.color-inverse.drop-shadow-strong(ng-show="changes.stage == 'checkout'&&changes.status=='declined'", ng-class="{'w3-animate-zoom': true}")
+            div
+              | Your card was declined
+              br
+              | Please check your details and try again
+            i.material-icons error_outline
+          .block.paying.error-popup.color-inverse.drop-shadow-strong(ng-show="changes.stage == 'checkout'&&changes.status=='error'", ng-class="{'w3-animate-zoom': true}")
+            div
+              | Something's gone wrong!
+              br
+              | Please report this immediately
+            i.material-icons error

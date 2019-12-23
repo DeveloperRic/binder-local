@@ -8,6 +8,7 @@ var File = require("../model/file");
 var uploadService;
 
 let uid;
+let planId;
 var directoryStore;
 let firstDelay;
 let taskDelay;
@@ -29,11 +30,13 @@ function init(options) {
     setImmediate(() => {
       checkOptions(options, [
         "uid",
+        "planId",
         "firstDelay",
         "taskDelay",
         "uploadService"
       ]);
       uid = options.uid.toString();
+      planId = options.planId.toString();
       firstDelay = options.firstDelay;
       taskDelay = options.taskDelay;
       uploadService = options.uploadService;
@@ -46,7 +49,7 @@ function init(options) {
           .catch(reject);
       } else {
         readDirectoryStore();
-        if (directoryStore.uid != uid) {
+        if (directoryStore.uid != uid || directoryStore.planId != planId) {
           directoryStore = resetDirectoryStore();
           pullDirectoryStore()
             .then(finialiseInit)
@@ -182,8 +185,7 @@ function selectFile(path, include) {
             {
               owner: uid,
               localPath:
-                directoryStore.active[directoryIndex].files[fileIndex]
-                  .path
+                directoryStore.active[directoryIndex].files[fileIndex].path
             },
             { ignored: true }
           ).then();
@@ -496,6 +498,7 @@ function saveDirectoryStore(onlyIfNew) {
   if (onlyIfNew && fs.existsSync(resolveDir("data/directories.json"))) return;
   let toSave = directoryStore || {
     uid,
+    planId,
     active: [],
     ignore: []
   };

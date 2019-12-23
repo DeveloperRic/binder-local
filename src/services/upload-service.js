@@ -36,6 +36,7 @@ let waiting = false;
 let allowedBlocks = [];
 let userId;
 let userTier;
+let planId;
 var initialised = false;
 let isDownloadsPaused;
 let isDownloadsWaiting;
@@ -62,14 +63,15 @@ let throttler = {
  * setting state variables, and verifing user's plan status.
  * NOTE: Will reject the promise only if an error occurs or the user's status could not be verified.
  * @param {"ObjectId"} uid
- * @param {"ObjectId"} planId
+ * @param {"ObjectId"} _planId
  * @param {function} downloadsPaused
  * @param {function} downloadsWaiting
  * @param {function} downloadResume
  */
-function init(uid, planId, downloadsPaused, downloadsWaiting, downloadResume) {
+function init(uid, _planId, downloadsPaused, downloadsWaiting, downloadResume) {
   return new Promise((resolve, reject) => {
     userId = uid.toString();
+    planId = _planId.toString();
     isDownloadsPaused = downloadsPaused;
     isDownloadsWaiting = downloadsWaiting;
     downloadsResume = downloadResume;
@@ -116,7 +118,9 @@ function init(uid, planId, downloadsPaused, downloadsWaiting, downloadResume) {
         // filter out files that no longer exist
         // **such files will be detected later by the spider
         try {
-          await removeOutdatedChanges(mergedSchedule.changed);
+          mergedSchedule.changed = await removeOutdatedChanges(
+            mergedSchedule.changed
+          );
         } catch (err) {
           return reject(err);
         }
@@ -153,11 +157,11 @@ function init(uid, planId, downloadsPaused, downloadsWaiting, downloadResume) {
 
 function finaliseInit(planId, resolve, reject) {
   // get user info for use in uploads
-  Plan.findById(planId, { expired: 1, tier: 1, blocks: 1 }, (err, plan) => {
+  Plan.findById(planId, { active: 1, tier: 1, blocks: 1 }, (err, plan) => {
     if (err) return reject(err);
-    if (!plan || plan.expired) {
+    if (!plan || !plan.active) {
       return reject(
-        new Error("User doesn't have a plan / user's plan has expired")
+        new Error("User doesn't have a plan / user's plan is inactive")
       );
     }
     // get user's blocks for use in uploads
@@ -165,6 +169,7 @@ function finaliseInit(planId, resolve, reject) {
       { _id: { $in: plan.blocks } },
       { _id: 1, bucket: 1, maxSize: 1, latestSize: 1 },
       (err, blocks) => {
+        console.log(planId);
         if (err) return reject(err);
         if (blocks.length == 0) {
           return reject(new Error("No allowed blocks found"));
@@ -222,7 +227,7 @@ function finaliseInit(planId, resolve, reject) {
         ).lean(true);
       }
     );
-  });
+  }).lean(true);
 }
 
 /**
@@ -277,14 +282,14 @@ function createBlankSchedule() {
 }
 
 /**
- * This function will query if the user's plan has expired.
- * If it has, future processing will be blocked and the promise rejected.
+ * This function will query if the user's plan is inactive.
+ * If it is, future processing will be blocked and the promise rejected.
  * Otherwise, the promise will resolve.
  * NOTE: the function will also block processing if an error occurs
  */
-function verifyPlanNotExpired() {
+function verifyPlanActive() {
   return new Promise((resolve, reject) => {
-    Plan.findOne({ owner: userId, expired: false }, { _id: 1 }, (err, plan) => {
+    Plan.findOne({ owner: userId, active: true }, { _id: 1 }, (err, plan) => {
       if (err) {
         allowProcessing = false;
         return reject(err);
@@ -328,7 +333,9 @@ function processChanges(changes, removed) {
         };
         let oldSize = uploadSchedule.changed.length;
         try {
-          await removeOutdatedChanges(uploadSchedule.changed);
+          uploadSchedule.changed = await removeOutdatedChanges(
+            uploadSchedule.changed
+          );
         } catch (err) {
           // if an error occurs, we must report the operation as failed
           return reject(err);
@@ -393,38 +400,38 @@ function processChanges(changes, removed) {
  * Checks all files with MongoDB and splices the outdated changes
  * @param {["FileDat"]} changes
  */
-async function removeOutdatedChanges(changes) {
-  for (let i = 0; i < changes.length; i++) {
-    let c = changes[i];
-    let newer = await changeIsNewer(c.path, c.modified);
-    if (!fs.existsSync(c.path) || !newer) {
-      changes.splice(i, 1);
-      i--;
-    }
-  }
-}
-
-function changeIsNewer(localPath, modifiedTime) {
+function removeOutdatedChanges(changes) {
   return new Promise((resolve, reject) => {
-    File.findOne(
+    File.find(
       {
-        localPath: localPath,
         owner: userId,
-        $and: [
+        localPath: { $in: changes.map(c => c.path) },
+        $or: [
           { idInDatabase: { $ne: "unset" } },
           { idInDatabase: { $ne: "deleted" } }
         ]
       },
-      { "log.lastModifiedTime": 1 },
-      (err, file) => {
+      { localPath: 1, ignored: 1, "log.lastModifiedTime": 1 },
+      (err, files) => {
         if (err) return reject(err);
-        if (!file || !file.log.lastModifiedTime) {
-          resolve(true);
+        if (files.length == 0) {
+          resolve(changes);
         } else {
-          resolve(modifiedTime > file.log.lastModifiedTime);
+          resolve(
+            changes.filter(c => {
+              let f = files.find(f => f.localPath == c.path.toString());
+              if (!f) return true;
+              if (f.ignored) return false;
+              if (f.log.lastModifiedTime) {
+                return c.modified > f.log.lastModifiedTime;
+              } else {
+                return true;
+              }
+            })
+          );
         }
       }
-    );
+    ).lean(true);
   });
 }
 
@@ -550,7 +557,7 @@ function resume() {
         paused = true;
         // verify the user's plan hasn't epired
         // if it has block future processing
-        return verifyPlanNotExpired()
+        return verifyPlanActive()
           .catch(err => console.error(err)) // errors aren't a worry here
           .then(resolve);
       }
@@ -567,7 +574,7 @@ function resume() {
       ) {
         console.log("all uploads failed");
         clearInterval(task);
-        return verifyPlanNotExpired()
+        return verifyPlanActive()
           .catch(err => console.error(err)) // errors aren't a worry here
           .then(resolve);
       }
@@ -956,6 +963,8 @@ function preUpload(fileDat) {
             if (fileBlock.isNew) {
               fileDoc.idInDatabase = "unset";
               fileDoc.nameInDatabase = fileBlock.nameInDatabase;
+              fileDoc.owner = userId;
+              fileDoc.plan = planId;
               fileDoc.block = fileBlock.block;
               fileDoc.bucket = fileBlock.bucket._id;
               fileDoc.originalSize = fileDat.bytes.total;
@@ -1343,7 +1352,9 @@ function onUploadProgress(fileDat, event, pn) {
 function onUploadFail(fileDat, err, session, resolve, reject) {
   try {
     session.abortTransaction();
-  } catch (err2) {}
+  } catch (err2) {
+    console.error(err2);
+  }
   fileDat.bytes.failed = fileDat.bytes.total - fileDat.bytes.done;
   // Retry the upload *once* if BackBlaze failed
   // to provide an upload URL.
@@ -1410,7 +1421,13 @@ function onUploadComplete(fileDat, data, initVect, session, resolve, reject) {
   let ipAddress = ip.address("public", "ipv6") || ip.address("public", "ipv4");
   // Update the file doc in MongoDB this
   // verifies the upload completed successfuly
-  console.log(data.fileName, "fileDat.size", fileDat.size, "isNew", !!fileDat.isNew);
+  console.log(
+    data.fileName,
+    "fileDat.size",
+    fileDat.size,
+    "isNew",
+    !!fileDat.isNew
+  );
   let fileDoc = {
     idInDatabase: data.fileId,
     nameInDatabase: data.fileName,
