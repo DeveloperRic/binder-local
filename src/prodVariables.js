@@ -8,6 +8,7 @@ require("dotenv").config();
 
 //TODO always change this to FALSE when publishing
 const DEV_MODE = false;
+//TODO allow restarting app in production-dev-mode
 const PROD_DEV_MODE = DEV_MODE || false;
 
 /**
@@ -50,7 +51,7 @@ module.exports = {
   checkAutoLauncher,
   API_DOMAIN: DEV_MODE
     ? "http://localhost:3000"
-    : process.env.BINDER_API_DOMAIN || "https://api.binderapp.xyz"
+    : process.env.BINDER_API_DOMAIN
 };
 
 //build iconURL http://www.iconj.com/ico/h/p/hpwvy4b6kc.ico

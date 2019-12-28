@@ -1,4 +1,5 @@
 const { BrowserWindow, app } = require("electron");
+const { PROD_DEV_MODE } = require("../../prodVariables");
 
 const appUtils = require("./appUtils");
 const User = require("../../model/user");
@@ -23,6 +24,10 @@ function createAppWindow(onClose, relaunchFunc) {
 
   appUtils.loadView(win, "home");
   relaunchFunction = relaunchFunc;
+
+  if (!PROD_DEV_MODE) {
+    win.removeMenu();
+  }
 
   win.on("minimize", event => {
     event.preventDefault();

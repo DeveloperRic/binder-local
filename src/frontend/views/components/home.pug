@@ -49,21 +49,26 @@ block component
       div
         code NO PLAN DETECTED
         button.bg-primary.border-accent(ng-click="G.switchStage('plans')") See Plans
-      p
+      p(ng-show="!G.user.awaiting_provision")
         br
         | It seems you have not yet registered a plan for your account.
         |  If you are not aware, Binder is an Automatic Backup System that pushes your documents to the cloud, keeping them safe and secure.
         |  This is especially useful for sensitive projects that you want to keep protected from loss or corruption.
-      h2 How this works
-      br
-      p First you select which folders you want Binder to backup.
-      p
-        | Then you configure, how big you need your Data Blocks to be and how many of them you want. Blocks are chunks of files that Binder manipulates in order to organise and optimise your archive.
+      p(ng-show="G.user.awaiting_provision")
         br
-        i Note: If a Block is too big or too small, access times may be slower.
-      p
-        | Finally, ensure you have a stable internet connection and let Binder perform an initial backup of the folders you've selected.
-        |  When this process completes, you will be able to view statistics and edit your archive in the cloud.
+        | Please wait while your purchased plan is activated in the cloud.
+        |  If this takes longer than a couple hours, please contact support.
+      ng-show(ng-show="!G.user.awaiting_provision")
+        h2 How this works
+        br
+        p First you select which folders you want Binder to backup.
+        p
+          | Then you configure, how big you need your Data Blocks to be and how many of them you want. Blocks are chunks of files that Binder manipulates in order to organise and optimise your archive.
+          br
+          i Note: If a Block is too big or too small, access times may be slower.
+        p
+          | Finally, ensure you have a stable internet connection and let Binder perform an initial backup of the folders you've selected.
+          |  When this process completes, you will be able to view statistics and edit your archive in the cloud.
     .content(ng-if="stage.status == '' && G.user.plan")
       .row.outer-row
         .uploads.col-md-3(ng-show="uploads.queue.length > 0")
