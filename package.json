@@ -102,7 +102,7 @@
     "keytar": "^4.9.0",
     "mime-types": "^2.1.24",
     "mongoose": "^5.7.5",
-    "path-parse": "^1.0.6",
+    "path-parse": "^1.0.7",
     "path-to-regexp": "^3.0.0",
     "request": "^2.88.0",
     "request-promise": "^4.2.5",
